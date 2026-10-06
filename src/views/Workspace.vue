@@ -436,9 +436,9 @@ function onKeydown(e: KeyboardEvent) {
         {{ explorer.visibleEntries.length }} 个项目
         <span v-if="explorer.selectedName">· 已选择 1 项</span>
       </span>
-      <span class="flex min-w-0 items-center gap-3">
-        <span class="flex min-w-0 items-center gap-1.5" :title="`${connections.active.profile.username}@${connections.active.profile.host}`">
-          <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-live" aria-hidden="true" />
+      <span class="flex min-w-0 items-baseline gap-3">
+        <span class="flex min-w-0 items-baseline gap-1.5" :title="`${connections.active.profile.username}@${connections.active.profile.host}`">
+          <span class="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-live" aria-hidden="true" />
           <span class="truncate font-medium">{{ connections.active.alias }}</span>
           <span class="truncate font-mono text-[11px]">
             {{ connections.active.profile.username }}@{{ connections.active.profile.host }}
