@@ -63,9 +63,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             v-else
             type="button"
             role="menuitem"
-            class="flex h-8 w-full items-center gap-2.5 rounded-[4px] px-2.5 text-left text-sm transition-colors hover:bg-fill-subtle"
+            class="flex h-8 w-full items-center gap-2.5 rounded-[4px] px-2.5 text-left text-sm transition-colors"
+            :class="item.disabled ? 'cursor-not-allowed opacity-40' : 'hover:bg-fill-subtle'"
             :style="{ color: item.danger ? 'var(--danger)' : 'var(--ink)' }"
-            @click="emit('select', item.key)"
+            :disabled="item.disabled"
+            :aria-disabled="item.disabled"
+            @click="!item.disabled && emit('select', item.key)"
           >
             <span class="flex w-4 shrink-0 justify-center">
               <component :is="item.icon" v-if="item.icon" :size="15" class="text-dim" />

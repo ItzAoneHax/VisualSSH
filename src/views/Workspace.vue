@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   ArrowLeft,
   ArrowRight,
   ClipboardCopy,
   Copy,
+  Download,
   Eye,
   FilePlus,
   FolderOpen,
@@ -147,6 +149,13 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
   items.push(
     { key: "copyName", label: "复制名称", icon: Copy },
     { key: "copyPath", label: "复制路径", icon: ClipboardCopy },
+    {
+      key: "download",
+      label: "下载到…",
+      icon: Download,
+      // 目录/链接暂不支持（未递归、不跟随目标）
+      disabled: entry.kind !== "file",
+    },
     { key: "sep2", label: "", separator: true },
     { key: "rename", label: "重命名", icon: Pencil },
     { key: "delete", label: "删除", icon: Trash2 },
@@ -176,6 +185,22 @@ async function onCtxMenuSelect(key: string) {
     case "copyPath":
       await copyText(joinPath(explorer.cwd, entry.name));
       break;
+    case "download": {
+      // 目录/链接置灰，双保险再判一次
+      if (entry.kind !== "file") break;
+      const target = await save({ defaultPath: entry.name });
+      // 取消保存对话框返回 null
+      if (!target) break;
+      const connectionId = connections.active?.connectionId;
+      if (connectionId) {
+        await transfers.startDownload(
+          connectionId,
+          joinPath(explorer.cwd, entry.name),
+          target,
+        );
+      }
+      break;
+    }
     case "rename":
       explorer.startRename(entry.name);
       break;

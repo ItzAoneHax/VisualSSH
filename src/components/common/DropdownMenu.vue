@@ -10,6 +10,8 @@ export interface MenuItem {
   danger?: boolean;
   checked?: boolean;
   separator?: boolean;
+  /** 未实现/不适用的操作置灰，不 emit */
+  disabled?: boolean;
 }
 
 defineProps<{
@@ -52,8 +54,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             type="button"
             role="menuitem"
             class="flex h-8 w-full items-center gap-2.5 rounded-[4px] px-2.5 text-left text-sm transition-colors"
+            :class="item.disabled ? 'cursor-not-allowed opacity-40' : 'hover:bg-fill-subtle'"
             :style="{ color: item.danger ? 'var(--danger)' : 'var(--ink)' }"
-            @click="emit('select', item.key)"
+            :disabled="item.disabled"
+            :aria-disabled="item.disabled"
+            @click="!item.disabled && emit('select', item.key)"
           >
             <span class="flex w-4 justify-center">
               <component :is="item.icon" v-if="item.icon" :size="15" class="text-dim" />
