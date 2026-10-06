@@ -9,8 +9,12 @@ use crate::ssh::SshSession;
 /// 所有 SFTP 操作都要按连接串行化，同时不阻塞其他连接。
 #[derive(Clone)]
 pub struct SessionHandle {
+    /// alias/host/port 供断线提示与传输中心显示目标，M1 阶段尚未读取
+    #[allow(dead_code)]
     pub alias: String,
+    #[allow(dead_code)]
     pub host: String,
+    #[allow(dead_code)]
     pub port: u16,
     pub session: Arc<AsyncMutex<SshSession>>,
 }

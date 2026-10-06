@@ -61,7 +61,8 @@ fn mode_string(permissions: Option<u32>, kind: &str) -> String {
     out.push(type_char);
     for shift in [6u32, 3, 0] {
         for (i, c) in RWX.iter().enumerate() {
-            out.push(if mode & (1 << (shift * 3 + (2 - i))) != 0 {
+            let bit = shift * 3 + (2 - i as u32);
+            out.push(if mode & (1 << bit) != 0 {
                 *c
             } else {
                 '-'
