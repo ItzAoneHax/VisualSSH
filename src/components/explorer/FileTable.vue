@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { File, Folder, Link2 } from "@lucide/vue";
+import { ChevronDown, ChevronUp, File, Folder, Link2 } from "@lucide/vue";
 
-import { useExplorerStore } from "@/stores/explorer";
+import { useExplorerStore, type SortKey } from "@/stores/explorer";
 import type { FileEntry } from "@/types";
-import { formatMtime, formatSize } from "@/utils/format";
+import { formatMtime, formatSize, kindLabel } from "@/utils/format";
 
 const explorer = useExplorerStore();
+
+/** DetailsLayoutPage 列序：名称 | 修改时间 | 类型 | 大小（+权限） */
+const columns: { key: SortKey; label: string; class: string }[] = [
+  { key: "name", label: "名称", class: "" },
+  { key: "mtime", label: "修改时间", class: "w-40" },
+  { key: "kind", label: "类型", class: "w-24" },
+  { key: "size", label: "大小", class: "w-24 text-right" },
+  { key: "permissions", label: "权限", class: "w-28 pl-2.5 font-mono" },
+];
 
 function iconFor(entry: FileEntry) {
   switch (entry.kind) {
@@ -23,9 +32,9 @@ function iconClass(entry: FileEntry): string {
     case "dir":
       return "text-folder";
     case "symlink":
-      return "text-accent-2";
+      return "text-accent";
     default:
-      return "text-faint";
+      return "text-dim";
   }
 }
 
@@ -39,29 +48,52 @@ function onRowDblClick(entry: FileEntry) {
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-xl border border-line bg-panel">
+  <!-- 列表容器内边距 8（DetailsLayoutPage ListView padding） -->
+  <div class="min-h-full px-2 pb-3">
+    <!-- 列头：40 高、左距 24、底部分隔线，点击排序 -->
     <div
-      class="grid grid-cols-[minmax(0,1fr)_88px_112px_150px] items-center border-b border-line bg-panel-2/60 px-3 py-2 text-[11px] font-semibold tracking-[0.08em] text-faint uppercase"
+      class="grid grid-cols-[minmax(0,1fr)_10rem_6rem_6rem_7rem] items-center border-b pl-6 text-xs text-dim"
+      :style="{ height: '40px', borderColor: 'var(--line)' }"
     >
-      <span>名称</span>
-      <span class="text-right">大小</span>
-      <span class="pl-4">权限</span>
-      <span class="pl-4">修改时间</span>
+      <button
+        v-for="col in columns"
+        :key="col.key"
+        type="button"
+        class="flex h-full items-center gap-1 text-left font-normal hover:text-ink"
+        :class="[col.class, col.key === 'name' ? 'pl-3' : 'pl-2.5']"
+        @click="explorer.sortBy(col.key)"
+      >
+        {{ col.label }}
+        <ChevronUp
+          v-if="explorer.sortKey === col.key && explorer.sortAsc"
+          :size="12"
+          class="text-dim"
+        />
+        <ChevronDown
+          v-else-if="explorer.sortKey === col.key"
+          :size="12"
+          class="text-dim"
+        />
+      </button>
     </div>
 
     <!-- 加载骨架 -->
     <div v-if="explorer.loading && !explorer.entries.length">
-      <div v-for="i in 9" :key="i" class="flex h-10 items-center px-3">
-        <div class="h-4 animate-pulse rounded bg-line" :style="{ width: `${18 + ((i * 13) % 40)}%` }" />
+      <div v-for="i in 9" :key="i" class="flex h-9 items-center px-3">
+        <div
+          class="h-4 animate-pulse rounded-[2px]"
+          :style="{ width: `${18 + ((i * 13) % 40)}%`, background: 'var(--line)' }"
+        />
       </div>
     </div>
 
-    <div v-else-if="explorer.visibleEntries.length" class="max-h-full overflow-y-auto">
+    <div v-else-if="explorer.visibleEntries.length">
       <div
         v-for="entry in explorer.visibleEntries"
         :key="entry.name"
-        class="grid cursor-default grid-cols-[minmax(0,1fr)_88px_112px_150px] items-center border-b border-line/50 px-3 py-1.5 transition-colors last:border-0 hover:bg-row-hover"
-        :class="explorer.selectedName === entry.name && 'bg-row-active'"
+        class="grid cursor-default grid-cols-[minmax(0,1fr)_10rem_6rem_6rem_7rem] items-center rounded-[4px] px-3 text-sm transition-colors"
+        :style="{ height: '36px' }"
+        :class="explorer.selectedName === entry.name ? 'bg-row-active' : 'hover:bg-row-hover'"
         role="row"
         :aria-selected="explorer.selectedName === entry.name"
         tabindex="0"
@@ -69,27 +101,30 @@ function onRowDblClick(entry: FileEntry) {
         @dblclick="onRowDblClick(entry)"
         @keydown.enter="entry.kind === 'dir' && explorer.enter(entry.name)"
       >
-        <span class="flex min-w-0 items-center gap-2.5">
+        <!-- 名称列：图标 16 + 文字距 6（DetailsLayoutPage IconColumn） -->
+        <span class="flex min-w-0 items-center pl-3">
           <component
             :is="iconFor(entry)"
-            :size="15"
+            :size="16"
             class="shrink-0"
             :class="iconClass(entry)"
             :fill="entry.kind === 'dir' ? 'currentColor' : 'none'"
           />
-          <span class="truncate font-mono text-[13px]">{{ entry.name }}</span>
+          <span class="truncate pl-1.5">{{ entry.name }}</span>
         </span>
-        <span class="text-right font-mono text-xs text-dim">
-          {{ entry.kind === "dir" ? "—" : formatSize(entry.size) }}
+        <!-- 列内容：caption 12、次级文字（ColumnContentTextBlock opacity .6） -->
+        <span class="truncate pl-2.5 text-xs text-dim">{{ formatMtime(entry.mtime) }}</span>
+        <span class="truncate pl-2.5 text-xs text-dim">{{ kindLabel(entry.kind) }}</span>
+        <span class="truncate text-right text-xs text-dim">
+          {{ entry.kind === "dir" ? "" : formatSize(entry.size) }}
         </span>
-        <span class="pl-4 font-mono text-xs text-dim">{{ entry.permissions }}</span>
-        <span class="pl-4 font-mono text-xs text-dim">{{ formatMtime(entry.mtime) }}</span>
+        <span class="truncate pl-2.5 font-mono text-xs text-dim">{{ entry.permissions }}</span>
       </div>
     </div>
 
-    <div v-else class="flex flex-col items-center py-16 text-sm text-dim">
-      <Folder :size="26" class="mb-2 text-faint" />
-      此目录为空
+    <div v-else class="flex flex-col items-center pt-20 text-dim">
+      <Folder :size="28" class="mb-3 text-faint" />
+      <span class="text-sm">此目录为空</span>
     </div>
   </div>
 </template>
