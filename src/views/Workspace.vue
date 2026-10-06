@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   ArrowLeft,
   ArrowRight,
@@ -19,6 +21,7 @@ import {
   ScrollText,
   Trash2,
   TriangleAlert,
+  Upload,
 } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { nextTick } from "vue";
@@ -33,6 +36,7 @@ import FileTable from "@/components/explorer/FileTable.vue";
 import TransferCenter from "@/components/workspace/TransferCenter.vue";
 import { useConnectionsStore } from "@/stores/connections";
 import { useExplorerStore } from "@/stores/explorer";
+import { useTransferStore } from "@/stores/transfer";
 import type { FileEntry } from "@/types";
 import { copyText, joinPath } from "@/utils/format";
 
@@ -42,6 +46,7 @@ const emit = defineEmits<{
 
 const connections = useConnectionsStore();
 const explorer = useExplorerStore();
+const transfers = useTransferStore();
 
 /** Files 快速跳转（对应侧栏驱动器/常用位置区） */
 const quickLinks = [
@@ -183,16 +188,40 @@ async function onCtxMenuSelect(key: string) {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   if (connections.active) {
     explorer.reset(connections.active.connectionId, connections.active.rootPath);
   }
   window.addEventListener("keydown", onKeydown);
+  // 系统文件拖入上传（WebView2 dragDropEnabled 默认开启；浏览器预览跳过）
+  if ("__TAURI_INTERNALS__" in window) {
+    unlistenDrag = await getCurrentWebview().onDragDropEvent((event) => {
+      const payload = event.payload;
+      if (payload.type === "enter") {
+        // 非文件拖拽（paths 为空）不显示覆盖层
+        dragOver.value = payload.paths.length > 0;
+      } else if (payload.type === "leave") {
+        dragOver.value = false;
+      } else if (payload.type === "drop") {
+        dragOver.value = false;
+        const connectionId = connections.active?.connectionId;
+        if (!connectionId) return;
+        for (const path of payload.paths) {
+          void transfers.startUpload(connectionId, path, explorer.cwd);
+        }
+      }
+    });
+  }
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
+  unlistenDrag?.();
 });
+
+/** 拖拽悬停：文件区显示「释放以上传」覆盖层 */
+const dragOver = ref(false);
+let unlistenDrag: UnlistenFn | null = null;
 
 /** F2 重命名、Delete 删除选中项；Alt+↑ 上一级 / Alt+← 后退 / Alt+→ 前进 */
 function onKeydown(e: KeyboardEvent) {
@@ -326,25 +355,51 @@ function onKeydown(e: KeyboardEvent) {
       </div>
 
       <!-- 文件区：FileArea 卡（8 圆角 + 1px 描边） -->
-      <div
-        ref="fileAreaRef"
-        class="min-h-0 flex-1 overflow-y-auto rounded-lg"
-        :style="{ background: 'var(--panel)', border: '1px solid var(--line)' }"
-      >
+      <div class="relative min-h-0 flex-1">
         <div
-          v-if="explorer.error"
-          class="m-2 flex items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-sm"
-          :style="{ background: 'color-mix(in srgb, var(--danger) 10%, transparent)', color: 'var(--danger)' }"
+          ref="fileAreaRef"
+          class="h-full overflow-y-auto rounded-lg"
+          :style="{ background: 'var(--panel)', border: '1px solid var(--line)' }"
         >
-          <TriangleAlert :size="15" class="shrink-0" />
-          <span class="min-w-0 flex-1 truncate text-xs" :title="explorer.error">
-            {{ explorer.error }}
-          </span>
-          <button type="button" class="btn-secondary h-7 px-2 text-xs" @click="explorer.refresh()">
-            重试
-          </button>
+          <div
+            v-if="explorer.error"
+            class="m-2 flex items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-sm"
+            :style="{ background: 'color-mix(in srgb, var(--danger) 10%, transparent)', color: 'var(--danger)' }"
+          >
+            <TriangleAlert :size="15" class="shrink-0" />
+            <span class="min-w-0 flex-1 truncate text-xs" :title="explorer.error">
+              {{ explorer.error }}
+            </span>
+            <button type="button" class="btn-secondary h-7 px-2 text-xs" @click="explorer.refresh()">
+              重试
+            </button>
+          </div>
+          <FileTable @context-menu="onFileContextMenu" />
         </div>
-        <FileTable @context-menu="onFileContextMenu" />
+
+        <!-- 拖拽悬停覆盖层：释放以上传到当前目录 -->
+        <div
+          v-if="dragOver"
+          class="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-lg"
+          :style="{
+            background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
+            border: '2px dashed var(--accent)',
+          }"
+        >
+          <div
+            class="flex flex-col items-center gap-1 rounded-lg px-6 py-4 shadow-xl"
+            :style="{
+              background: 'var(--surface-solid)',
+              border: '1px solid var(--stroke-flyout)',
+            }"
+          >
+            <Upload :size="22" class="text-accent" />
+            <span class="text-sm font-semibold">释放以上传到</span>
+            <span class="max-w-64 truncate font-mono text-xs text-dim" :title="explorer.cwd">
+              {{ explorer.cwd }}
+            </span>
+          </div>
+        </div>
       </div>
 
       <!-- 状态栏 -->
