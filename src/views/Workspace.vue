@@ -45,6 +45,7 @@ import { useTerminalStore } from "@/stores/terminal";
 import { useTransferStore } from "@/stores/transfer";
 import type { FileEntry } from "@/types";
 import { copyText, joinPath } from "@/utils/format";
+import { readClipboardFiles, stageDir, writeClipboardFiles } from "@/api/clipboard";
 
 const emit = defineEmits<{
   disconnect: [];
@@ -67,6 +68,50 @@ function onOpenFile(entry: FileEntry) {
 function onOpenTerminal() {
   const connectionId = connections.active?.connectionId;
   if (connectionId) void terminalStore.openIn(explorer.cwd, connectionId);
+}
+
+/** Ctrl+C：多选文件静默下载到暂存目录，全部完成后写入系统剪贴板（HDROP） */
+async function copySelectionToClipboard() {
+  const connectionId = connections.active?.connectionId;
+  if (!connectionId || explorer.selectedNames.size === 0) return;
+  const files = [...explorer.selectedNames]
+    .map((n) => explorer.entryByName(n))
+    .filter((e): e is FileEntry => !!e);
+  if (files.some((f) => f.kind === "dir")) {
+    explorer.error = "复制到剪贴板暂不支持文件夹，请仅选择文件";
+    return;
+  }
+  try {
+    const dir = await stageDir();
+    const localOf = (name: string) => `${dir}\\${name}`;
+    const ids = await Promise.all(
+      files.map((f) => transfers.startDownloadTo(connectionId, joinPath(explorer.cwd, f.name), localOf(f.name))),
+    );
+    const allDone = await transfers.waitAllDone(ids);
+    if (!allDone) {
+      explorer.error = "部分文件下载失败，未写入剪贴板（详见传输中心）";
+      return;
+    }
+    await writeClipboardFiles(files.map((f) => localOf(f.name)));
+  } catch (e) {
+    explorer.error = e instanceof Error ? e.message : String(e);
+  }
+}
+
+/** Ctrl+V：读系统剪贴板文件列表（HDROP），逐个上传到当前目录 */
+async function pasteFromClipboard() {
+  const connectionId = connections.active?.connectionId;
+  if (!connectionId) return;
+  let localPaths: string[];
+  try {
+    localPaths = await readClipboardFiles();
+  } catch {
+    return;
+  }
+  if (!localPaths.length) return;
+  for (const p of localPaths) {
+    await transfers.startUpload(connectionId, p, explorer.cwd);
+  }
 }
 
 /** Files 快速跳转（对应侧栏驱动器/常用位置区） */
@@ -97,18 +142,42 @@ const ctxMenu = ref<{ open: boolean; x: number; y: number; entry: FileEntry | nu
   entry: null,
 });
 
-/** 删除确认与权限编辑的目标条目 */
-const deleteTarget = ref<FileEntry | null>(null);
+/** 删除确认与权限编辑的目标条目（删除支持批量） */
+const deleteTargets = ref<FileEntry[] | null>(null);
 const chmodTarget = ref<FileEntry | null>(null);
 
+/** 单条删除（右键菜单）或按当前多选批量（Delete 键） */
 function requestDelete(entry: FileEntry | null) {
-  if (entry) deleteTarget.value = entry;
+  if (entry && explorer.isSelected(entry.name) && explorer.selectedNames.size > 1) {
+    // 右键项在多选集合内：批量删整个集合
+    deleteTargets.value = [...explorer.selectedNames]
+      .map((n) => explorer.entryByName(n))
+      .filter((e): e is FileEntry => !!e);
+    return;
+  }
+  if (entry) {
+    deleteTargets.value = [entry];
+    return;
+  }
+  // 无参调用 = Delete 键作用于当前选择
+  const targets = [...explorer.selectedNames]
+    .map((n) => explorer.entryByName(n))
+    .filter((e): e is FileEntry => !!e);
+  if (targets.length) deleteTargets.value = targets;
 }
 
 function confirmDelete() {
-  const target = deleteTarget.value;
-  deleteTarget.value = null;
-  if (target) explorer.deleteEntry(target.name, target.kind === "dir");
+  const targets = deleteTargets.value;
+  deleteTargets.value = null;
+  if (!targets?.length) return;
+  if (targets.length === 1) {
+    explorer.deleteEntry(targets[0].name, targets[0].kind === "dir");
+  } else {
+    void explorer.deleteEntries(
+      targets.map((t) => t.name),
+      (name) => targets.find((t) => t.name === name)?.kind === "dir",
+    );
+  }
 }
 
 function onFileContextMenu(payload: { entry: FileEntry | null; x: number; y: number }) {
@@ -249,14 +318,26 @@ function onKeydown(e: KeyboardEvent) {
   ) {
     return;
   }
-  if (e.key === "F2" && explorer.selectedName) {
+  // 悬浮窗（编辑器/终端）打开时让位
+  if (editor.open || terminalStore.open) return;
+  if (e.ctrlKey && (e.key === "c" || e.key === "C")) {
     e.preventDefault();
-    explorer.startRename(explorer.selectedName);
+    void copySelectionToClipboard();
     return;
   }
-  if (e.key === "Delete" && explorer.selectedName) {
+  if (e.ctrlKey && (e.key === "v" || e.key === "V")) {
     e.preventDefault();
-    requestDelete(explorer.entryByName(explorer.selectedName));
+    void pasteFromClipboard();
+    return;
+  }
+  if (e.key === "F2" && explorer.selectedNames.size === 1) {
+    e.preventDefault();
+    explorer.startRename([...explorer.selectedNames][0]);
+    return;
+  }
+  if (e.key === "Delete" && explorer.selectedNames.size > 0) {
+    e.preventDefault();
+    requestDelete(null);
     return;
   }
   if (!e.altKey) return;
@@ -427,7 +508,7 @@ function onKeydown(e: KeyboardEvent) {
     >
       <span>
         {{ explorer.visibleEntries.length }} 个项目
-        <span v-if="explorer.selectedName">· 已选择 1 项</span>
+        <span v-if="explorer.selectedNames.size">· 已选择 {{ explorer.selectedNames.size }} 项</span>
       </span>
       <span class="flex min-w-0 items-baseline gap-3">
         <span class="flex min-w-0 items-baseline gap-1.5" :title="`${connections.active.profile.username}@${connections.active.profile.host}`">
@@ -452,17 +533,23 @@ function onKeydown(e: KeyboardEvent) {
     />
 
     <!-- 删除确认：远程删除不可恢复，红色主按钮 -->
-    <Modal :open="!!deleteTarget" title="删除确认" @close="deleteTarget = null">
-      <div v-if="deleteTarget" class="flex flex-col gap-4">
+    <Modal :open="!!deleteTargets" title="删除确认" @close="deleteTargets = null">
+      <div v-if="deleteTargets?.length" class="flex flex-col gap-4">
         <p class="text-sm leading-6">
-          确定要删除「<span class="font-semibold">{{ deleteTarget.name }}</span>
-          {{ deleteTarget.kind === "dir" ? "」文件夹吗？其中的所有内容都将被一并删除。" : "」吗？" }}
+          <template v-if="deleteTargets.length === 1">
+            确定要删除「<span class="font-semibold">{{ deleteTargets[0].name }}</span>
+            {{ deleteTargets[0].kind === "dir" ? "」文件夹吗？其中的所有内容都将被一并删除。" : "」吗？" }}
+          </template>
+          <template v-else>
+            确定要删除这 <span class="font-semibold">{{ deleteTargets.length }}</span> 个项目吗？
+            <span v-if="deleteTargets.some((t) => t.kind === 'dir')">文件夹中的所有内容都将被一并删除。</span>
+          </template>
         </p>
         <p class="text-xs text-faint">
-          路径 {{ explorer.cwd }}/{{ deleteTarget.name }} — 远程删除无法撤销。
+          路径 {{ explorer.cwd }}/{{ deleteTargets.length === 1 ? deleteTargets[0].name : "…" }} — 远程删除无法撤销。
         </p>
         <footer class="mt-1 flex justify-end gap-2">
-          <button type="button" class="btn-secondary" @click="deleteTarget = null">
+          <button type="button" class="btn-secondary" @click="deleteTargets = null">
             取消
           </button>
           <button type="button" class="btn-danger" @click="confirmDelete">

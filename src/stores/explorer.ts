@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 import { chmodSsh, deleteSsh, listDir, mkdirSsh, renameSsh, touchSsh } from "@/api/ssh";
 import type { FileEntry } from "@/types";
@@ -27,7 +27,10 @@ export const useExplorerStore = defineStore("explorer", () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
   const showHidden = ref(false);
-  const selectedName = ref<string | null>(null);
+  /** 多选集合（Windows 语义：单击/Ctrl 反选/Shift 范围/框选） */
+  const selectedNames = ref<Set<string>>(new Set());
+  /** Shift 范围选择锚点（上次单选/反选项，非响应式） */
+  let anchorName: string | null = null;
   /** 详情视图列排序（Files：点击列头切换，同列翻转方向） */
   const sortKey = ref<SortKey>("name");
   const sortAsc = ref(true);
@@ -53,7 +56,8 @@ export const useExplorerStore = defineStore("explorer", () => {
     if (!connectionId.value || loading.value) return;
     loading.value = true;
     error.value = null;
-    selectedName.value = null;
+    selectedNames.value = new Set();
+    anchorName = null;
     cancelEdit();
     try {
       entries.value = await listDir(connectionId.value, path);
@@ -171,7 +175,7 @@ export const useExplorerStore = defineStore("explorer", () => {
     void runOp(
       () => (kind === "dir" ? mkdirSsh : touchSsh)(connectionId.value, path),
       () => {
-        selectedName.value = name;
+        selectOnly(name);
       },
     );
   }
@@ -188,7 +192,7 @@ export const useExplorerStore = defineStore("explorer", () => {
           joinPath(cwd.value, name),
         ),
       () => {
-        selectedName.value = name;
+        selectOnly(name);
       },
     );
   }
@@ -197,7 +201,11 @@ export const useExplorerStore = defineStore("explorer", () => {
     void runOp(
       () => deleteSsh(connectionId.value, joinPath(cwd.value, name), recursive),
       () => {
-        if (selectedName.value === name) selectedName.value = null;
+        if (selectedNames.value.has(name)) {
+          const next = new Set(selectedNames.value);
+          next.delete(name);
+          selectedNames.value = next;
+        }
       },
     );
   }
@@ -211,7 +219,8 @@ export const useExplorerStore = defineStore("explorer", () => {
     cwd.value = rootPath;
     entries.value = [];
     error.value = null;
-    selectedName.value = null;
+    selectedNames.value = new Set();
+    anchorName = null;
     // 连接初始态应用设置默认值（排序/隐藏项显隐）
     showHidden.value = useSettingsStore().settings.showHidden;
     sortKey.value = useSettingsStore().settings.defaultSortKey;
@@ -229,6 +238,8 @@ export const useExplorerStore = defineStore("explorer", () => {
     error.value = null;
     history.value = [];
     historyIndex.value = -1;
+    selectedNames.value = new Set();
+    anchorName = null;
     cancelEdit();
   }
 
@@ -253,6 +264,15 @@ export const useExplorerStore = defineStore("explorer", () => {
       .sort((a, b) => dirFirst(a, b) || asc * compare[key](a, b));
   });
 
+  // 目录内容变化后剔除已不存在的选择项（保持其余选择）
+  watch(visibleEntries, (entries) => {
+    const alive = new Set(entries.map((e) => e.name));
+    const kept = [...selectedNames.value].filter((n) => alive.has(n));
+    if (kept.length !== selectedNames.value.size) {
+      selectedNames.value = new Set(kept);
+    }
+  });
+
   function sortBy(key: SortKey) {
     if (sortKey.value === key) {
       sortAsc.value = !sortAsc.value;
@@ -269,7 +289,78 @@ export const useExplorerStore = defineStore("explorer", () => {
   );
 
   function select(name: string | null) {
-    selectedName.value = name;
+    if (name) selectOnly(name);
+    else clearSelection();
+  }
+
+  function selectOnly(name: string) {
+    selectedNames.value = new Set([name]);
+    anchorName = name;
+  }
+
+  function toggleSelect(name: string) {
+    const next = new Set(selectedNames.value);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    selectedNames.value = next;
+    anchorName = name;
+  }
+
+  /** Shift 范围：锚点 → 当前项（按可见顺序） */
+  function selectRange(name: string) {
+    const names = visibleEntries.value.map((e) => e.name);
+    const a = names.indexOf(anchorName ?? name);
+    const b = names.indexOf(name);
+    if (a < 0 || b < 0) {
+      selectOnly(name);
+      return;
+    }
+    const [lo, hi] = a < b ? [a, b] : [b, a];
+    selectedNames.value = new Set(names.slice(lo, hi + 1));
+  }
+
+  /** 框选结果应用（additive = 按住 Ctrl 的并集框选） */
+  function applyRubberSelection(names: string[], additive: boolean) {
+    if (additive) {
+      const next = new Set(selectedNames.value);
+      for (const n of names) next.add(n);
+      selectedNames.value = next;
+    } else {
+      selectedNames.value = new Set(names);
+    }
+  }
+
+  function clearSelection() {
+    selectedNames.value = new Set();
+    anchorName = null;
+  }
+
+  function isSelected(name: string): boolean {
+    return selectedNames.value.has(name);
+  }
+
+  /** 批量删除：单个 runOp 内串行执行，失败即停（剩余保持） */
+  async function deleteEntries(names: string[], recursive: (name: string) => boolean) {
+    if (opPending.value || !connectionId.value) return;
+    opPending.value = true;
+    error.value = null;
+    const failed: string[] = [];
+    for (const name of names) {
+      try {
+        await deleteSsh(connectionId.value, joinPath(cwd.value, name), recursive(name));
+      } catch (e) {
+        failed.push(name);
+        error.value = e instanceof Error ? e.message : String(e);
+        break;
+      }
+    }
+    opPending.value = false;
+    if (!failed.length) {
+      await reloadPreserve();
+      const removed = new Set(names);
+      const kept = [...selectedNames.value].filter((n) => !removed.has(n));
+      selectedNames.value = new Set(kept);
+    }
   }
 
   return {
@@ -279,7 +370,7 @@ export const useExplorerStore = defineStore("explorer", () => {
     loading,
     error,
     showHidden,
-    selectedName,
+    selectedNames,
     sortKey,
     sortAsc,
     renamingName,
@@ -298,6 +389,13 @@ export const useExplorerStore = defineStore("explorer", () => {
     reset,
     clear,
     select,
+    selectOnly,
+    toggleSelect,
+    selectRange,
+    applyRubberSelection,
+    clearSelection,
+    isSelected,
+    deleteEntries,
     sortBy,
     entryByName,
     startRename,

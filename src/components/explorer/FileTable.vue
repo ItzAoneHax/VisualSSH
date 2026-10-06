@@ -83,12 +83,14 @@ function iconClass(entry: FileEntry): string {
   }
 }
 
-/** Windows 资源管理器语义：单击选中（不切换）、Ctrl+单击反选 */
+/** Windows 资源管理器语义：单击单选 / Ctrl+单击反选 / Shift+单击范围 */
 function onRowClick(entry: FileEntry, e: MouseEvent) {
   if (e.ctrlKey) {
-    explorer.select(explorer.selectedName === entry.name ? null : entry.name);
+    explorer.toggleSelect(entry.name);
+  } else if (e.shiftKey) {
+    explorer.selectRange(entry.name);
   } else {
-    explorer.select(entry.name);
+    explorer.selectOnly(entry.name);
   }
 }
 
@@ -97,9 +99,9 @@ function onRowDblClick(entry: FileEntry) {
   else emit("openFile", entry);
 }
 
-/** 右键未选中项时先选中（资源管理器行为），再上报菜单位置 */
+/** 右键未选中项时先单选（资源管理器行为）；已选中则保持多选 */
 function onRowContextMenu(entry: FileEntry, e: MouseEvent) {
-  if (explorer.selectedName !== entry.name) explorer.select(entry.name);
+  if (!explorer.isSelected(entry.name)) explorer.selectOnly(entry.name);
   emit("contextMenu", { entry, x: e.clientX, y: e.clientY });
 }
 
@@ -107,15 +109,65 @@ function onBlankContextMenu(e: MouseEvent) {
   emit("contextMenu", { entry: null, x: e.clientX, y: e.clientY });
 }
 
-/** 点击列表空白区域清除选中 */
-function onBlankClick() {
-  if (explorer.selectedName) explorer.select(null);
+/** —— 橡皮筋框选：空白处按下拖动画框，与行矩形相交即选中 —— */
+const rubber = ref<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+/** 框选进行中禁文本选择 */
+const rubberActive = ref(false);
+
+function onContainerPointerDown(e: PointerEvent) {
+  if (e.button !== 0) return;
+  // 落在行/按钮/输入框上不启动框选
+  if ((e.target as HTMLElement).closest("[data-row], button, input")) return;
+  const startX = e.clientX;
+  const startY = e.clientY;
+  const additive = e.ctrlKey;
+  let moved = false;
+
+  const onMove = (ev: PointerEvent) => {
+    if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 4) {
+      moved = true;
+      rubberActive.value = true;
+      rubber.value = { x1: startX, y1: startY, x2: ev.clientX, y2: ev.clientY };
+    }
+  };
+  const onUp = (ev: PointerEvent) => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    if (moved) {
+      const box = {
+        left: Math.min(startX, ev.clientX),
+        right: Math.max(startX, ev.clientX),
+        top: Math.min(startY, ev.clientY),
+        bottom: Math.max(startY, ev.clientY),
+      };
+      const hits: string[] = [];
+      for (const el of document.querySelectorAll("[data-row]")) {
+        const r = el.getBoundingClientRect();
+        const intersect =
+          r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top;
+        if (intersect) hits.push((el as HTMLElement).dataset.row!);
+      }
+      explorer.applyRubberSelection(hits, additive);
+    } else {
+      // 未拖动 = 空白单击：清除选择
+      explorer.clearSelection();
+    }
+    rubber.value = null;
+    rubberActive.value = false;
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
 }
 </script>
 
 <template>
-  <!-- 列表容器内边距 8（DetailsLayoutPage ListView padding） -->
-  <div class="min-h-full px-2 pb-3" @click="onBlankClick" @contextmenu.prevent="onBlankContextMenu($event)">
+  <!-- 列表容器内边距 8（DetailsLayoutPage ListView padding）；空白拖动 = 橡皮筋框选 -->
+  <div
+    class="relative min-h-full px-2 pb-3"
+    :class="rubberActive && 'select-none'"
+    @pointerdown="onContainerPointerDown"
+    @contextmenu.prevent="onBlankContextMenu($event)"
+  >
     <!-- 列头：40 高、左距 24、底部分隔线，点击排序；sticky 钉在文件区顶部 -->
     <div
       class="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_10rem_6rem_6rem_7rem] items-center border-b pl-6 text-xs text-dim"
@@ -189,9 +241,10 @@ function onBlankClick() {
           :key="entry.name"
           class="grid cursor-default grid-cols-[minmax(0,1fr)_10rem_6rem_6rem_7rem] items-center rounded-[4px] px-3 text-sm transition-colors"
           :style="{ height: '36px' }"
-          :class="explorer.selectedName === entry.name ? 'bg-row-active' : 'hover:bg-row-hover'"
+          :class="explorer.isSelected(entry.name) ? 'bg-row-active' : 'hover:bg-row-hover'"
           role="row"
-          :aria-selected="explorer.selectedName === entry.name"
+          :data-row="entry.name"
+          :aria-selected="explorer.isSelected(entry.name)"
           tabindex="0"
           @click.stop="onRowClick(entry, $event)"
           @dblclick.stop="onRowDblClick(entry)"
@@ -237,5 +290,19 @@ function onBlankClick() {
         <span class="text-sm">此目录为空</span>
       </div>
     </template>
+
+    <!-- 橡皮筋选框（视口坐标，强调色描边 + 半透明填充） -->
+    <div
+      v-if="rubber"
+      class="pointer-events-none fixed z-30"
+      :style="{
+        left: `${Math.min(rubber.x1, rubber.x2)}px`,
+        top: `${Math.min(rubber.y1, rubber.y2)}px`,
+        width: `${Math.abs(rubber.x2 - rubber.x1)}px`,
+        height: `${Math.abs(rubber.y2 - rubber.y1)}px`,
+        background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+        border: '1px solid var(--accent)',
+      }"
+    />
   </div>
 </template>
