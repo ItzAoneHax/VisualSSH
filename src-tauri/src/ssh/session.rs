@@ -219,6 +219,14 @@ impl SshSession {
             .map_err(|e| Error::Sftp(format!("打开远端文件 {path} 失败: {e}")))
     }
 
+    /// 打开一个新的 SSH 会话通道（终端 PTY 用；与 SFTP 通道相互独立）。
+    pub async fn open_session_channel(&self) -> Result<russh::Channel<russh::client::Msg>> {
+        self.handle
+            .channel_open_session()
+            .await
+            .map_err(|e| Error::Sftp(format!("打开会话通道失败: {e}")))
+    }
+
     /// 创建远端文件写入句柄（上传流用；已存在则截断）。
     pub async fn open_write(&self, path: &str) -> Result<RemoteFile> {
         self.sftp

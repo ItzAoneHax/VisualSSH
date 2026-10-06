@@ -305,14 +305,16 @@ pub async fn ssh_write_file(
         .map_err(|_| Error::Timeout)?
 }
 
-/// 断开并移除会话池中的连接；同时取消该连接的全部传输。
+/// 断开并移除会话池中的连接；同时取消该连接的全部传输并关闭其全部终端。
 #[tauri::command]
 pub async fn ssh_disconnect(
     connection_id: String,
     state: State<'_, AppState>,
     transfers: State<'_, crate::transfer::TransferManager>,
+    terminals: State<'_, std::sync::Arc<crate::terminal::TerminalManager>>,
 ) -> Result<()> {
     transfers.cancel_for_connection(&connection_id);
+    terminals.close_for_connection(&connection_id);
     if let Some(handle) = state.remove(&connection_id) {
         let session = handle.session.lock().await;
         session.disconnect().await;

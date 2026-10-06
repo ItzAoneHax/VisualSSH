@@ -40,6 +40,9 @@ pub enum Error {
     #[error("传输 — {0}")]
     Transfer(String),
 
+    #[error("终端 — {0}")]
+    Terminal(String),
+
     #[error("连接不存在或已断开 — {0}")]
     NoSession(String),
 
