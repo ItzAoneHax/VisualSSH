@@ -263,7 +263,7 @@ function discardAndClose() {
     <Transition name="editor-pop" appear>
       <div
         v-if="editor.open"
-        class="fixed inset-0 z-40 flex items-center justify-center p-6"
+        class="fixed inset-0 top-9 z-40 flex items-center justify-center p-6"
         :style="{
           background: 'color-mix(in srgb, var(--bg) 30%, rgba(0, 0, 0, 0.32))',
           backdropFilter: 'blur(6px)',
