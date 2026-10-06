@@ -21,6 +21,7 @@ import {
   Pencil,
   RefreshCw,
   ScrollText,
+  SquareTerminal,
   Trash2,
   TriangleAlert,
   Upload,
@@ -36,10 +37,12 @@ import Breadcrumbs from "@/components/explorer/Breadcrumbs.vue";
 import ChmodDialog from "@/components/explorer/ChmodDialog.vue";
 import FileTable from "@/components/explorer/FileTable.vue";
 import EditorDrawer from "@/components/workspace/EditorDrawer.vue";
+import TerminalPanel from "@/components/workspace/TerminalPanel.vue";
 import TransferCenter from "@/components/workspace/TransferCenter.vue";
 import { useConnectionsStore } from "@/stores/connections";
 import { useEditorStore } from "@/stores/editor";
 import { useExplorerStore } from "@/stores/explorer";
+import { useTerminalStore } from "@/stores/terminal";
 import { useTransferStore } from "@/stores/transfer";
 import type { FileEntry } from "@/types";
 import { copyText, joinPath } from "@/utils/format";
@@ -52,11 +55,18 @@ const connections = useConnectionsStore();
 const explorer = useExplorerStore();
 const transfers = useTransferStore();
 const editor = useEditorStore();
+const terminalStore = useTerminalStore();
 
 /** 双击文本文件 → 打开编辑抽屉 */
 function onOpenFile(entry: FileEntry) {
   const connectionId = connections.active?.connectionId;
   if (connectionId) void editor.openEntry(entry, explorer.cwd, connectionId);
+}
+
+/** 打开终端（在当前目录启动 shell；已开则聚焦面板） */
+function onOpenTerminal() {
+  const connectionId = connections.active?.connectionId;
+  if (connectionId) void terminalStore.openIn(explorer.cwd, connectionId);
 }
 
 /** Files 快速跳转（对应侧栏驱动器/常用位置区） */
@@ -251,6 +261,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   unlistenDrag?.();
+  // 工作区销毁（断开连接）→ 终端面板复位（pty 由后端 ssh_disconnect 联动关闭）
+  terminalStore.reset();
 });
 
 /** 拖拽悬停：文件区显示「释放以上传」覆盖层 */
@@ -358,6 +370,16 @@ function onKeydown(e: KeyboardEvent) {
           <Breadcrumbs />
         </div>
 
+        <button
+          type="button"
+          class="btn-icon"
+          title="打开终端（当前目录）"
+          aria-label="打开终端"
+          @click="onOpenTerminal"
+        >
+          <SquareTerminal :size="16" />
+        </button>
+
         <TransferCenter />
         <ThemeToggle />
         <div class="relative">
@@ -424,6 +446,9 @@ function onKeydown(e: KeyboardEvent) {
 
       <!-- 底部编辑抽屉 -->
       <EditorDrawer />
+
+      <!-- 底部终端面板 -->
+      <TerminalPanel />
       </div>
     </div>
 
