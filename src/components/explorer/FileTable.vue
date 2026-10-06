@@ -28,13 +28,17 @@ watch(
   },
 );
 
-/** 进入编辑态时聚焦，并选中文件名主体（Windows 语义：不含扩展名） */
+/** 进入编辑态时聚焦，并选中文件名主体（Windows 语义：不含扩展名）。
+ *  v-model 的 value 赋值发生在 ref 回调之后（会把光标推到末尾），
+ *  因此选区推迟到下一帧再设置。 */
 function focusEditInput(el: unknown, name: string) {
   if (!(el instanceof HTMLInputElement)) return;
   el.focus();
-  const dot = name.lastIndexOf(".");
-  if (dot > 0) el.setSelectionRange(0, dot);
-  else el.select();
+  requestAnimationFrame(() => {
+    const dot = name.lastIndexOf(".");
+    if (dot > 0) el.setSelectionRange(0, dot);
+    else el.select();
+  });
 }
 
 function commitRename(entry: FileEntry) {

@@ -232,6 +232,7 @@ export const useConnectionsStore = defineStore("connections", () => {
     active,
     upsert,
     remove,
+    migrateCredentials,
     test,
     connect,
     confirmHostKey,
