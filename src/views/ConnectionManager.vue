@@ -90,7 +90,7 @@ function handleRemove(profile: SshProfile) {
         </button>
 
         <div
-          class="mx-1.5 flex h-[34px] min-w-0 max-w-72 flex-1 items-center rounded-[4px] px-3 text-sm"
+          class="mx-1.5 flex h-[34px] min-w-0 flex-1 items-center rounded-[4px] px-3 text-sm"
           :style="{ background: 'var(--sidebar)', border: '1px solid var(--line)' }"
         >
           <House :size="14" class="mr-1.5 shrink-0 text-dim" />

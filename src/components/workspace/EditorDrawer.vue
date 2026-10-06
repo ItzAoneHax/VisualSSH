@@ -64,6 +64,12 @@ const cmTheme = EditorView.theme({
     color: "var(--faint)",
     border: "none",
     borderRight: "1px solid var(--line)",
+    fontFamily: "var(--font-mono)",
+    fontSize: "12px",
+  },
+  ".cm-lineNumbers .cm-gutterElement": {
+    minWidth: "44px",
+    paddingRight: "12px",
   },
   ".cm-activeLine": { backgroundColor: "var(--fill-subtle)" },
   ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--ink)" },

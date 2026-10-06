@@ -367,15 +367,28 @@ impl SshSession {
             let _ = self.sftp.remove_file(&tmp_path).await;
             return Err(Error::Sftp(format!("写入 {path} 失败: {e}")));
         }
-        // close 等待远端确认全部写入，再原子替换
+        // close 等待远端确认全部写入；失败则清理临时文件
         if let Err(e) = tmp.close().await {
             let _ = self.sftp.remove_file(&tmp_path).await;
             return Err(Error::Sftp(format!("写入 {path} 失败: {e}")));
         }
-        self.sftp
-            .rename(&tmp_path, path)
-            .await
-            .map_err(|e| Error::Sftp(format!("替换 {path} 失败: {e}")))
+        // SFTP 的 RENAME 在目标已存在时被多数服务器拒绝（russh-sftp 未暴露
+        // posix-rename 扩展，无法原子覆盖）。参照 WinSCP 同款回退：删旧后重试。
+        // 窗口期内目标短暂不可见，但新内容始终完整保留在临时文件中：
+        // 若重试仍失败，明确告知用户恢复路径。
+        if let Err(first) = self.sftp.rename(&tmp_path, path).await {
+            self.sftp.remove_file(path).await.map_err(|e| {
+                Error::Sftp(format!(
+                    "替换 {path} 失败: {first}（清理旧文件也失败: {e}）。新内容完整保留在 {tmp_path}，可手动恢复"
+                ))
+            })?;
+            if let Err(e) = self.sftp.rename(&tmp_path, path).await {
+                return Err(Error::Sftp(format!(
+                    "替换 {path} 失败: {e}。你的新内容完整保留在 {tmp_path}，可在文件列表中手动重命名恢复"
+                )));
+            }
+        }
+        Ok(())
     }
 }
 
