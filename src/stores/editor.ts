@@ -18,6 +18,9 @@ function extOf(name: string): string {
   return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
 }
 
+/** Markdown 预览态（仅 .md：双击默认预览，可切源码） */
+export type PreviewMode = "preview" | "source";
+
 /** 是否可进编辑抽屉（白名单 + ≤2MB 的文件/符号链接） */
 export function isPreviewable(entry: FileEntry): boolean {
   if (entry.kind !== "file" && entry.kind !== "symlink") return false;
@@ -46,8 +49,12 @@ export const useEditorStore = defineStore("editor", () => {
   const doc = ref("");
   const savedDoc = ref("");
 
+  /** 预览/源码切换（仅 isMarkdown 时有意义） */
+  const previewMode = ref<PreviewMode>("source");
+
   const dirty = computed(() => doc.value !== savedDoc.value);
   const isJson = computed(() => extOf(fileName.value) === "json");
+  const isMarkdown = computed(() => extOf(fileName.value) === "md");
 
   /** 双击入口：先做白名单/大小判定，再异步加载内容 */
   async function openEntry(entry: FileEntry, cwd: string, connId: string) {
@@ -58,6 +65,8 @@ export const useEditorStore = defineStore("editor", () => {
     error.value = null;
     savedDoc.value = "";
     doc.value = "";
+    // .md 默认预览态，其余源码态
+    previewMode.value = extOf(entry.name) === "md" ? "preview" : "source";
     open.value = true;
 
     if (!isPreviewable(entry)) {
@@ -90,6 +99,11 @@ export const useEditorStore = defineStore("editor", () => {
     editable.value = !editable.value;
   }
 
+  /** 预览/源码切换：进源码时不需要额外动作，预览内容由组件实时渲染 */
+  function setPreviewMode(mode: PreviewMode) {
+    previewMode.value = mode;
+  }
+
   function toggleMaximized() {
     maximized.value = !maximized.value;
   }
@@ -100,6 +114,7 @@ export const useEditorStore = defineStore("editor", () => {
     unsupported.value = false;
     editable.value = false;
     maximized.value = false;
+    previewMode.value = "source";
     error.value = null;
     doc.value = "";
     savedDoc.value = "";
@@ -152,9 +167,12 @@ export const useEditorStore = defineStore("editor", () => {
     savedDoc,
     dirty,
     isJson,
+    isMarkdown,
+    previewMode,
     openEntry,
     setContent,
     toggleEditable,
+    setPreviewMode,
     toggleMaximized,
     closeNow,
     save,

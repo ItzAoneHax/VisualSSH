@@ -13,7 +13,8 @@ import { basicSetup } from "codemirror";
 import { EditorView, keymap } from "@codemirror/view";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
-import { nextTick, onBeforeUnmount, ref, watch } from "vue";
+import MarkdownIt from "markdown-it";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 
 import Modal from "@/components/common/Modal.vue";
 import { useEditorStore } from "@/stores/editor";
@@ -113,6 +114,33 @@ function extOf(name: string): string {
   return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
 }
 
+/**
+ * Markdown 渲染：html:false 转义内嵌 HTML（远程文件内容不可信，防 XSS），
+ * 链接强制新窗口 + noopener。
+ */
+const md = new MarkdownIt({ html: false, linkify: true, breaks: false });
+const defaultLinkOpen =
+  md.renderer.rules.link_open ??
+  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  tokens[idx].attrSet("target", "_blank");
+  tokens[idx].attrSet("rel", "noopener noreferrer");
+  return defaultLinkOpen(tokens, idx, options, env, self);
+};
+
+/** 预览内容随源码实时联动（源码态编辑后切回预览即为最新） */
+const renderedHtml = computed(() => md.render(editor.doc));
+
+/** 预览态点「编辑」：一步切到源码并进入可写 */
+function onEditClick() {
+  if (editor.previewMode === "preview") {
+    editor.setPreviewMode("source");
+    editor.editable = true;
+    return;
+  }
+  editor.toggleEditable();
+}
+
 let view: EditorView | null = null;
 const host = ref<HTMLElement | null>(null);
 /** 语言加载竞态序号：仅应用最新一次 */
@@ -197,6 +225,14 @@ watch(
       changes: { from: 0, to: view.state.doc.length, insert: editor.doc },
     });
     void loadLanguage();
+  },
+);
+
+// 预览态下编辑器容器 display:none，切回源码需重新测量行高
+watch(
+  () => editor.previewMode,
+  (mode) => {
+    if (mode === "source") view?.requestMeasure();
   },
 );
 
@@ -308,6 +344,29 @@ function discardAndClose() {
         </span>
       </span>
 
+      <!-- Markdown：预览/源码分段切换 -->
+      <div
+        v-if="editor.isMarkdown"
+        class="flex shrink-0 rounded-md p-0.5"
+        :style="{ background: 'var(--fill-control)', border: '1px solid var(--line)' }"
+        role="tablist"
+        aria-label="查看方式"
+      >
+        <button
+          v-for="mode in [{ key: 'preview', label: '预览' }, { key: 'source', label: '源码' }] as const"
+          :key="mode.key"
+          type="button"
+          role="tab"
+          class="rounded-[4px] px-2.5 py-1 text-xs font-medium transition-colors"
+          :class="editor.previewMode === mode.key ? 'text-ink' : 'text-dim hover:text-ink'"
+          :style="editor.previewMode === mode.key ? { background: 'var(--surface-solid)', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.16)' } : undefined"
+          :aria-selected="editor.previewMode === mode.key"
+          @click="editor.setPreviewMode(mode.key)"
+        >
+          {{ mode.label }}
+        </button>
+      </div>
+
       <!-- JSON 格式化（可写时） -->
       <button
         v-if="editor.isJson && editor.editable"
@@ -320,14 +379,14 @@ function discardAndClose() {
         格式化
       </button>
 
-      <!-- 编辑/只读切换：可写或未保存时高亮 -->
+      <!-- 编辑/只读切换：可写或未保存时高亮；预览态点击=切源码并进入编辑 -->
       <button
         type="button"
         class="h-7 gap-1.5 px-2.5 text-xs"
         :class="editor.editable || editor.dirty ? 'btn-primary' : 'btn-secondary'"
         :title="editor.editable ? '当前可编辑' : '切换为可编辑'"
         :disabled="editor.unsupported"
-        @click="editor.toggleEditable()"
+        @click="onEditClick"
       >
         <Pencil :size="13" />
         编辑
@@ -391,8 +450,19 @@ function discardAndClose() {
         <span class="text-xs">预览不可用 — 仅支持 2MB 内的文本文件</span>
       </div>
 
+      <!-- Markdown 预览（渲染实时联动源码） -->
+      <div
+        v-if="editor.previewMode === 'preview' && !editor.loading && !editor.unsupported"
+        class="md-preview absolute inset-0 overflow-y-auto"
+        v-html="renderedHtml"
+      />
+
       <!-- CodeMirror 挂载点 -->
-      <div v-show="!editor.loading && !editor.unsupported" ref="host" class="h-full" />
+      <div
+        v-show="!editor.loading && !editor.unsupported && editor.previewMode === 'source'"
+        ref="host"
+        class="h-full"
+      />
 
       <!-- 右下角拖拽调整大小 -->
       <div
