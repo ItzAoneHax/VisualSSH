@@ -6,7 +6,7 @@ use tauri::State;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::error::{Error, Result};
-use crate::ssh::{AuthMethod, FileEntry, SshSession};
+use crate::ssh::{AuthMethod, FileEntry, HostEntry, KnownHosts, SshSession};
 use crate::state::{AppState, SessionHandle};
 
 /// 连接 + 首次 SFTP 握手的总预算
@@ -68,7 +68,10 @@ fn non_empty(value: &Option<String>) -> Option<String> {
         .map(str::to_string)
 }
 
-async fn connect_with_timeout(profile: &SshProfileInput) -> Result<SshSession> {
+async fn connect_with_timeout(
+    profile: &SshProfileInput,
+    known: KnownHosts,
+) -> Result<(SshSession, crate::ssh::HostKeyRecord)> {
     let host = profile.host.trim().to_string();
     if host.is_empty() {
         return Err(Error::Connect {
@@ -82,7 +85,7 @@ async fn connect_with_timeout(profile: &SshProfileInput) -> Result<SshSession> {
 
     tokio::time::timeout(
         CONNECT_TIMEOUT,
-        SshSession::connect(&host, profile.port, username, &auth),
+        SshSession::connect(&host, profile.port, username, &auth, known),
     )
     .await
     .map_err(|_| Error::Timeout)?
@@ -96,7 +99,20 @@ pub async fn ssh_connect(
     state: State<'_, AppState>,
 ) -> Result<ConnectResult> {
     let started = Instant::now();
-    let session = connect_with_timeout(&profile).await?;
+    let mut known = KnownHosts::load()?;
+    // 快照交给回调做 TOFU 校验；命令层保留一份用于首次信任后落盘
+    let (session, host_key) = connect_with_timeout(&profile, known.clone()).await?;
+
+    if host_key.first_time {
+        // 信任记录落盘失败视为连接失败：没有基线的 TOFU 等于没有防护
+        known.upsert(HostEntry {
+            host: profile.host.trim().to_string(),
+            port: profile.port,
+            algorithm: host_key.algorithm,
+            fingerprint: host_key.fingerprint,
+        });
+        known.save()?;
+    }
 
     let root_path = tokio::time::timeout(IO_TIMEOUT, session.canonicalize("/"))
         .await
@@ -121,15 +137,17 @@ pub async fn ssh_connect(
 }
 
 /// 测试连接：完整走一遍「TCP + 认证 + SFTP 握手」，结果以值返回而非 Err，
-/// 让前端能区分「测试失败」与「命令本身异常」。
+/// 让前端能区分「测试失败」与「命令本身异常」。探测不落盘首次信任记录，
+/// 由正式连接（ssh_connect）负责写入。
 #[tauri::command]
 pub async fn ssh_test(profile: SshProfileInput) -> Result<TestResult> {
     let started = Instant::now();
-    let outcome = connect_with_timeout(&profile).await;
+    let known = KnownHosts::load()?;
+    let outcome = connect_with_timeout(&profile, known).await;
     let latency_ms = started.elapsed().as_millis() as u64;
 
     let session = match outcome {
-        Ok(session) => session,
+        Ok((session, _)) => session,
         Err(e) => {
             return Ok(TestResult {
                 ok: false,
@@ -262,4 +280,22 @@ pub async fn ssh_disconnect(connection_id: String, state: State<'_, AppState>) -
         session.disconnect().await;
     }
     Ok(())
+}
+
+/// 用户在指纹变更对话框确认后更新 known_hosts（随后由前端发起重连）。
+#[tauri::command]
+pub async fn ssh_trust_host(
+    host: String,
+    port: u16,
+    algorithm: String,
+    fingerprint: String,
+) -> Result<()> {
+    let mut known = KnownHosts::load()?;
+    known.upsert(HostEntry {
+        host: host.trim().to_string(),
+        port,
+        algorithm,
+        fingerprint,
+    });
+    known.save()
 }

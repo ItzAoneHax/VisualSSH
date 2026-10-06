@@ -17,6 +17,7 @@ pub fn run() {
             commands::ssh_delete,
             commands::ssh_chmod,
             commands::ssh_disconnect,
+            commands::ssh_trust_host,
         ])
         .run(tauri::generate_context!())
         .expect("VisualSSH 启动失败");

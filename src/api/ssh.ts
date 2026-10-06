@@ -33,3 +33,13 @@ export function listDir(
 export function disconnectSsh(connectionId: string): Promise<void> {
   return invoke("ssh_disconnect", { connectionId });
 }
+
+/** 指纹变更经用户确认后，更新 known_hosts 记录（随后重连） */
+export function trustHost(
+  host: string,
+  port: number,
+  algorithm: string,
+  fingerprint: string,
+): Promise<void> {
+  return invoke("ssh_trust_host", { host, port, algorithm, fingerprint });
+}

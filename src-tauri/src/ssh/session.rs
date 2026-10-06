@@ -1,30 +1,74 @@
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use russh::client::{self, Handle};
-use russh::keys::PrivateKeyWithHashAlg;
+use russh::keys::{HashAlg, PrivateKeyWithHashAlg};
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::{FileAttributes, OpenFlags};
 
 use super::fs::{self, FileEntry};
+use super::known_hosts::KnownHosts;
 use crate::error::{Error, Result};
 
-/// SSH 客户端事件回调。
-///
-/// 安全说明：MVP 阶段 `check_server_key` 信任所有主机密钥，
-/// known_hosts 校验（TOFU，首次信任 + 指纹变更告警）在 M2 落地。
-pub struct ClientHandler;
+/// 单次连接的主机密钥校验结论。
+#[derive(Clone)]
+enum CheckOutcome {
+    /// 首次见到该主机：TOFU 自动信任，由命令层在认证成功后落盘
+    FirstTime,
+    /// 指纹与已存记录一致
+    Matched,
+    /// 指纹与已存记录不一致（可能换钥，也可能中间人）
+    Mismatch { old: String },
+}
+
+/// check_server_key 回调写入的结论快照，connect 返回后供命令层读取。
+#[derive(Clone)]
+struct CheckRecord {
+    outcome: CheckOutcome,
+    algorithm: String,
+    fingerprint: String,
+}
+
+/// SSH 客户端事件回调：check_server_key 实现 TOFU（首次信任 + 变更拒绝）。
+pub struct ClientHandler {
+    host: String,
+    port: u16,
+    known: KnownHosts,
+    check: Arc<Mutex<Option<CheckRecord>>>,
+}
 
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::PublicKeyOrCertificate,
+        server_public_key: &russh::keys::PublicKeyOrCertificate,
     ) -> std::result::Result<bool, Self::Error> {
-        Ok(true)
+        let key = server_public_key.public_key();
+        let algorithm = key.algorithm().to_string();
+        let fingerprint = key.fingerprint(HashAlg::Sha256).to_string();
+
+        let (outcome, ok) = match self.known.lookup(&self.host, self.port) {
+            Some(e) if e.fingerprint == fingerprint => (CheckOutcome::Matched, true),
+            Some(e) => (CheckOutcome::Mismatch { old: e.fingerprint.clone() }, false),
+            None => (CheckOutcome::FirstTime, true),
+        };
+        *self.check.lock().unwrap() = Some(CheckRecord {
+            outcome,
+            algorithm,
+            fingerprint,
+        });
+        Ok(ok)
     }
+}
+
+/// 连接成功后交给命令层的主机密钥摘要。
+#[derive(Clone)]
+pub struct HostKeyRecord {
+    pub algorithm: String,
+    pub fingerprint: String,
+    pub first_time: bool,
 }
 
 pub enum AuthMethod {
@@ -45,7 +89,8 @@ impl SshSession {
         port: u16,
         username: &str,
         auth: &AuthMethod,
-    ) -> Result<Self> {
+        known: KnownHosts,
+    ) -> Result<(Self, HostKeyRecord)> {
         let config = Arc::new(client::Config {
             keepalive_interval: Some(Duration::from_secs(30)),
             keepalive_max: 3,
@@ -53,12 +98,36 @@ impl SshSession {
             ..Default::default()
         });
 
-        let mut handle = client::connect(config, (host, port), ClientHandler)
+        let check = Arc::new(Mutex::new(None));
+        let handler = ClientHandler {
+            host: host.to_string(),
+            port,
+            known,
+            check: Arc::clone(&check),
+        };
+
+        let mut handle = client::connect(config, (host, port), handler)
             .await
-            .map_err(|e| Error::Connect {
-                host: host.to_string(),
-                port,
-                reason: e.to_string(),
+            .map_err(|e| {
+                // 指纹不匹配时 russh 只报泛型错误；用回调结论改写为结构化错误
+                let record = check.lock().unwrap().clone();
+                if let Some(CheckRecord {
+                    outcome: CheckOutcome::Mismatch { old },
+                    algorithm,
+                    fingerprint,
+                }) = record
+                {
+                    return Error::HostKeyChanged {
+                        new_fingerprint: fingerprint,
+                        old_fingerprint: old,
+                        algorithm,
+                    };
+                }
+                Error::Connect {
+                    host: host.to_string(),
+                    port,
+                    reason: e.to_string(),
+                }
             })?;
 
         let auth_result = match auth {
@@ -91,7 +160,21 @@ impl SshSession {
         }
 
         let sftp = Self::open_sftp(&handle).await?;
-        Ok(Self { handle, sftp })
+
+        let host_key = match check.lock().unwrap().clone() {
+            Some(record) => HostKeyRecord {
+                first_time: matches!(record.outcome, CheckOutcome::FirstTime),
+                algorithm: record.algorithm,
+                fingerprint: record.fingerprint,
+            },
+            // check_server_key 必然先于认证被调用；防御性兜底按「已匹配」处理
+            None => HostKeyRecord {
+                first_time: false,
+                algorithm: String::new(),
+                fingerprint: String::new(),
+            },
+        };
+        Ok((Self { handle, sftp }, host_key))
     }
 
     async fn open_sftp(handle: &Handle<ClientHandler>) -> Result<SftpSession> {

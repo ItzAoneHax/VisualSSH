@@ -4,6 +4,7 @@ import { computed, ref } from "vue";
 
 import ConnectionCard from "@/components/connection/ConnectionCard.vue";
 import ConnectionForm from "@/components/connection/ConnectionForm.vue";
+import Modal from "@/components/common/Modal.vue";
 import ThemeToggle from "@/components/common/ThemeToggle.vue";
 import { useConnectionsStore } from "@/stores/connections";
 
@@ -154,5 +155,57 @@ function handleRemove(profile: SshProfile) {
       @close="formOpen = false"
       @save="handleSave"
     />
+
+    <!-- 指纹变更确认（TOFU）：展示新旧指纹，确认即更新记录并重连 -->
+    <Modal
+      :open="!!connections.hostKeyPrompt"
+      title="服务器指纹已变更"
+      @close="connections.cancelHostKey()"
+    >
+      <div v-if="connections.hostKeyPrompt" class="flex flex-col gap-4">
+        <div
+          class="flex items-start gap-2.5 rounded-lg p-3 text-sm leading-6"
+          :style="{
+            background: 'color-mix(in srgb, var(--danger) 10%, transparent)',
+            color: 'var(--danger)',
+          }"
+        >
+          <TriangleAlert :size="16" class="mt-1 shrink-0" />
+          <span>
+            <span class="font-mono font-semibold">
+              {{ connections.hostKeyPrompt.host }}:{{ connections.hostKeyPrompt.port }}
+            </span>
+            的主机公钥指纹与上次连接时不同。这可能是服务器重装或更换了密钥，
+            也可能是中间人攻击。请确认您了解这一变化后再继续。
+          </span>
+        </div>
+
+        <dl class="grid grid-cols-[5.5rem_1fr] items-center gap-x-3 gap-y-2 text-sm">
+          <dt class="text-dim">原指纹</dt>
+          <dd class="truncate rounded-[4px] px-2 py-1 font-mono text-xs"
+              :style="{ background: 'var(--fill-control)' }"
+              :title="connections.hostKeyPrompt.oldFingerprint">
+            {{ connections.hostKeyPrompt.oldFingerprint }}
+          </dd>
+          <dt class="text-dim">新指纹</dt>
+          <dd class="truncate rounded-[4px] px-2 py-1 font-mono text-xs font-semibold"
+              :style="{ background: 'var(--fill-control)' }"
+              :title="connections.hostKeyPrompt.newFingerprint">
+            {{ connections.hostKeyPrompt.newFingerprint }}
+          </dd>
+          <dt class="text-dim">密钥类型</dt>
+          <dd class="font-mono text-xs">{{ connections.hostKeyPrompt.algorithm }}</dd>
+        </dl>
+
+        <footer class="mt-1 flex justify-end gap-2">
+          <button type="button" class="btn-secondary" @click="connections.cancelHostKey()">
+            取消连接
+          </button>
+          <button type="button" class="btn-danger" @click="connections.confirmHostKey()">
+            信任新指纹并连接
+          </button>
+        </footer>
+      </div>
+    </Modal>
   </div>
 </template>

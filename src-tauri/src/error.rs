@@ -22,6 +22,18 @@ pub enum Error {
     #[error("读取目录失败 — {0}")]
     ReadDir(String),
 
+    /// 前端协议错误：消息固定为 `HOSTKEY_CHANGED|新指纹|旧指纹|算法`，
+    /// connections store 按该前缀截获并弹指纹确认对话框。
+    #[error("HOSTKEY_CHANGED|{new_fingerprint}|{old_fingerprint}|{algorithm}")]
+    HostKeyChanged {
+        new_fingerprint: String,
+        old_fingerprint: String,
+        algorithm: String,
+    },
+
+    #[error("known_hosts 记录异常 — {0}")]
+    KnownHosts(String),
+
     #[error("连接不存在或已断开 — {0}")]
     NoSession(String),
 

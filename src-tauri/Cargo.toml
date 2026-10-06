@@ -25,6 +25,8 @@ russh = "0.64"
 russh-sftp = "3"
 thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
+# 跨平台用户配置目录（known_hosts 等落到 %APPDATA%/visualssh）
+dirs = "7"
 
 [profile.release]
 codegen-units = 1
