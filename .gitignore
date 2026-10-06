@@ -17,3 +17,7 @@ Thumbs.db
 
 # 本地环境
 *.local
+
+# 根目录单文件产物（npm run exe 生成）
+/VisualSSH.exe
+/*.exe
