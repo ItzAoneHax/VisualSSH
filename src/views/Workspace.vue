@@ -291,45 +291,30 @@ function onKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div v-if="connections.active" class="flex h-full">
-    <!-- 侧栏：裸 Mica 层（无边框），32px 导航项 + 3px 强调指示条 -->
-    <aside class="flex w-56 shrink-0 flex-col py-2 pl-1.5">
-      <nav aria-label="导航">
-        <button type="button" class="nav-item" @click="emit('disconnect')">
-          <House :size="16" class="ml-1 shrink-0" />
-          <span class="ml-3 truncate">主页</span>
-        </button>
+  <div v-if="connections.active" class="flex h-full flex-col">
+    <div class="flex min-h-0 flex-1">
+      <!-- 侧栏：裸 Mica 层（无边框），32px 导航项 + 3px 强调指示条 -->
+      <aside class="flex w-56 shrink-0 flex-col py-2 pl-1.5">
+        <nav aria-label="导航">
+          <button type="button" class="nav-item" @click="emit('disconnect')">
+            <House :size="16" class="ml-1 shrink-0" />
+            <span class="ml-3 truncate">主页</span>
+          </button>
 
-        <p class="mt-4 mb-1 px-2.5 text-xs font-medium text-faint">此服务器</p>
-        <button
-          v-for="link in quickLinks"
-          :key="link.path"
-          type="button"
-          class="nav-item"
-          :class="explorer.cwd === link.path && 'active'"
-          @click="explorer.open(link.path)"
-        >
-          <component :is="link.icon" :size="16" class="ml-1 shrink-0" />
-          <span class="ml-3 truncate">{{ link.label }}</span>
-        </button>
-      </nav>
-
-      <!-- 底部连接信息卡 -->
-      <div class="mt-auto px-1.5 pb-1">
-        <div
-          class="rounded-lg p-3"
-          :style="{ background: 'var(--toolbar)', border: '1px solid var(--line)' }"
-        >
-          <p class="flex items-center gap-1.5 text-[13px] font-semibold">
-            <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-live" aria-hidden="true" />
-            <span class="truncate">{{ connections.active.alias }}</span>
-          </p>
-          <p class="mt-1 truncate font-mono text-[11px] text-dim">
-            {{ connections.active.profile.username }}@{{ connections.active.profile.host }}
-          </p>
-        </div>
-      </div>
-    </aside>
+          <p class="mt-4 mb-1 px-2.5 text-xs font-medium text-faint">此服务器</p>
+          <button
+            v-for="link in quickLinks"
+            :key="link.path"
+            type="button"
+            class="nav-item"
+            :class="explorer.cwd === link.path && 'active'"
+            @click="explorer.open(link.path)"
+          >
+            <component :is="link.icon" :size="16" class="ml-1 shrink-0" />
+            <span class="ml-3 truncate">{{ link.label }}</span>
+          </button>
+        </nav>
+      </aside>
 
     <!-- 主列：地址行卡 + 文件区卡 + 编辑抽屉 + 状态栏 -->
     <div class="flex min-w-0 flex-1 flex-col gap-1 p-2 pl-2.5" data-main-col>
@@ -439,16 +424,29 @@ function onKeydown(e: KeyboardEvent) {
 
       <!-- 底部编辑抽屉 -->
       <EditorDrawer />
-
-      <!-- 状态栏（Files StatusBar：无传输元素，仅目录统计） -->
-      <footer class="flex h-8 shrink-0 items-center justify-between px-3 text-xs text-dim">
-        <span>
-          {{ explorer.visibleEntries.length }} 个项目
-          <span v-if="explorer.selectedName">· 已选择 1 项</span>
-        </span>
-        <span class="font-mono">{{ connections.active.latencyMs }} ms</span>
-      </footer>
+      </div>
     </div>
+
+    <!-- 通栏状态栏：项目统计 + 连接状态（全宽一条，底部唯一收边） -->
+    <footer
+      class="flex h-8 shrink-0 items-center justify-between border-t px-3 text-xs text-dim"
+      :style="{ borderColor: 'var(--line)' }"
+    >
+      <span>
+        {{ explorer.visibleEntries.length }} 个项目
+        <span v-if="explorer.selectedName">· 已选择 1 项</span>
+      </span>
+      <span class="flex min-w-0 items-center gap-3">
+        <span class="flex min-w-0 items-center gap-1.5" :title="`${connections.active.profile.username}@${connections.active.profile.host}`">
+          <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-live" aria-hidden="true" />
+          <span class="truncate font-medium">{{ connections.active.alias }}</span>
+          <span class="truncate font-mono text-[11px]">
+            {{ connections.active.profile.username }}@{{ connections.active.profile.host }}
+          </span>
+        </span>
+        <span class="shrink-0 font-mono">{{ connections.active.latencyMs }} ms</span>
+      </span>
+    </footer>
 
     <!-- 文件区右键菜单（光标定位） -->
     <ContextMenu
