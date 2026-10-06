@@ -1,10 +1,19 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 
+import { credentialDelete, credentialGet, credentialKey, credentialPut } from "@/api/credentials";
 import { connectSsh, disconnectSsh, testSsh, trustHost } from "@/api/ssh";
 import type { SshProfile, SshProfileInput, TestState } from "@/types";
 
 const STORAGE_KEY = "visualssh:profiles:v1";
+/** 明文凭据已迁移进系统加密存储的标记 */
+const SECURE_FLAG = "visualssh:secure:v1";
+
+/** 旧版 profile 里可能残留的明文凭据字段（迁移用） */
+interface LegacySecrets {
+  password?: string;
+  passphrase?: string;
+}
 
 function loadProfiles(): SshProfile[] {
   try {
@@ -14,6 +23,31 @@ function loadProfiles(): SshProfile[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * 首次启动迁移：把 localStorage 里的明文 password/passphrase
+ * 写入系统加密存储后剥离明文。任何一步失败都保留原状，下次启动重试。
+ */
+async function migratePlaintextCredentials(profiles: SshProfile[]) {
+  let dirty = false;
+  for (const profile of profiles as (SshProfile & LegacySecrets)[]) {
+    if (profile.password !== undefined) {
+      await credentialPut(credentialKey(profile.id, "password"), profile.password);
+    }
+    if (profile.passphrase !== undefined) {
+      await credentialPut(credentialKey(profile.id, "passphrase"), profile.passphrase);
+    }
+    if (profile.password !== undefined || profile.passphrase !== undefined) {
+      delete profile.password;
+      delete profile.passphrase;
+      dirty = true;
+    }
+  }
+  if (dirty) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
+  }
+  localStorage.setItem(SECURE_FLAG, "1");
 }
 
 export interface ActiveConnection {
@@ -65,7 +99,28 @@ export const useConnectionsStore = defineStore("connections", () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles.value));
   }
 
-  function upsert(profile: SshProfile) {
+  /** 启动时执行一次：迁移旧明文凭据；失败静默保留，下次启动重试 */
+  async function migrateCredentials() {
+    if (localStorage.getItem(SECURE_FLAG)) return;
+    try {
+      await migratePlaintextCredentials(profiles.value);
+    } catch {
+      // 系统凭据存储暂不可用（如浏览器预览）：不动数据，正式应用内重试
+    }
+  }
+  void migrateCredentials();
+
+  /** secrets 仅在用户本次输入了新值时出现；编辑留空 = 保持已存凭据 */
+  async function upsert(
+    profile: SshProfile,
+    secrets?: { password?: string; passphrase?: string },
+  ) {
+    if (secrets?.password !== undefined) {
+      await credentialPut(credentialKey(profile.id, "password"), secrets.password);
+    }
+    if (secrets?.passphrase !== undefined) {
+      await credentialPut(credentialKey(profile.id, "passphrase"), secrets.passphrase);
+    }
     const idx = profiles.value.findIndex((p) => p.id === profile.id);
     if (idx >= 0) {
       profiles.value.splice(idx, 1, profile);
@@ -79,12 +134,15 @@ export const useConnectionsStore = defineStore("connections", () => {
     profiles.value = profiles.value.filter((p) => p.id !== id);
     delete testStates.value[id];
     persist();
+    // 清理系统凭据为尽力而为；失败不阻塞配置删除
+    void credentialDelete(credentialKey(id, "password")).catch(() => {});
+    void credentialDelete(credentialKey(id, "passphrase")).catch(() => {});
   }
 
   async function test(profile: SshProfile) {
     testStates.value[profile.id] = { status: "testing" };
     try {
-      const result = await testSsh(toInput(profile));
+      const result = await testSsh(await toInput(profile));
       let message = result.message;
       if (message && parseHostKeyError(message)) {
         message = "服务器指纹已变更 — 请点击「连接」并在弹窗中确认新指纹";
@@ -105,7 +163,7 @@ export const useConnectionsStore = defineStore("connections", () => {
     lastError.value = null;
     hostKeyPrompt.value = null;
     try {
-      const result = await connectSsh(profile.alias, toInput(profile));
+      const result = await connectSsh(profile.alias, await toInput(profile));
       active.value = {
         connectionId: result.connectionId,
         alias: profile.alias,
@@ -182,15 +240,23 @@ export const useConnectionsStore = defineStore("connections", () => {
   };
 });
 
-function toInput(profile: SshProfile): SshProfileInput {
+/** 连接/测试时从系统加密存储现取凭据 */
+async function toInput(profile: SshProfile): Promise<SshProfileInput> {
+  const password =
+    profile.authMethod === "password"
+      ? (await credentialGet(credentialKey(profile.id, "password"))) ?? undefined
+      : undefined;
+  const passphrase =
+    profile.authMethod === "privateKey"
+      ? (await credentialGet(credentialKey(profile.id, "passphrase"))) ?? undefined
+      : undefined;
   return {
     host: profile.host,
     port: profile.port,
     username: profile.username,
-    password: profile.authMethod === "password" ? profile.password : undefined,
+    password,
     privateKeyPath:
       profile.authMethod === "privateKey" ? profile.privateKeyPath : undefined,
-    passphrase:
-      profile.authMethod === "privateKey" ? profile.passphrase : undefined,
+    passphrase,
   };
 }

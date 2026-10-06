@@ -34,6 +34,9 @@ pub enum Error {
     #[error("known_hosts 记录异常 — {0}")]
     KnownHosts(String),
 
+    #[error("系统凭据存储 — {0}")]
+    Credential(String),
+
     #[error("连接不存在或已断开 — {0}")]
     NoSession(String),
 

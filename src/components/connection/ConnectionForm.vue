@@ -12,7 +12,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: [];
-  save: [profile: SshProfile];
+  /** secrets 仅含本次输入的新凭据；编辑时留空 = 保持系统加密存储中的旧值 */
+  save: [profile: SshProfile, secrets: { password?: string; passphrase?: string }];
 }>();
 
 interface FormState {
@@ -49,15 +50,16 @@ watch(
   (open) => {
     if (!open) return;
     const source = props.profile;
+    // 凭据不回填：编辑时留空表示保持已存值
     Object.assign(form, blank(), {
       alias: source?.alias ?? source?.host ?? "",
       host: source?.host ?? "",
       port: source?.port ?? 22,
       username: source?.username ?? "root",
       authMethod: source?.authMethod ?? "password",
-      password: source?.password ?? "",
+      password: "",
       privateKeyPath: source?.privateKeyPath ?? "",
-      passphrase: source?.passphrase ?? "",
+      passphrase: "",
     });
     errors.host = errors.username = errors.port = "";
   },
@@ -78,13 +80,14 @@ function save() {
     authMethod: form.authMethod,
     createdAt: props.profile?.createdAt ?? Date.now(),
   };
+  const secrets: { password?: string; passphrase?: string } = {};
   if (form.authMethod === "password") {
-    base.password = form.password || undefined;
+    if (form.password) secrets.password = form.password;
   } else {
     base.privateKeyPath = form.privateKeyPath.trim() || undefined;
-    base.passphrase = form.passphrase || undefined;
+    if (form.passphrase) secrets.passphrase = form.passphrase;
   }
-  emit("save", base);
+  emit("save", base, secrets);
 }
 </script>
 
@@ -160,7 +163,7 @@ function save() {
           v-model="form.password"
           class="field-input font-mono"
           type="password"
-          placeholder="••••••••"
+          :placeholder="profile ? '留空保持不变' : '••••••••'"
           autocomplete="new-password"
         />
       </div>
@@ -183,6 +186,7 @@ function save() {
             v-model="form.passphrase"
             class="field-input font-mono"
             type="password"
+            :placeholder="profile ? '留空保持不变' : ''"
             autocomplete="new-password"
           />
         </div>

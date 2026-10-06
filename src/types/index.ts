@@ -1,6 +1,10 @@
 export type AuthMethod = "password" | "privateKey";
 
-/** 已保存的连接配置（前端持久化于 localStorage，M2 迁移至系统加密存储） */
+/**
+ * 已保存的连接配置（非敏感字段持久化于 localStorage）。
+ * 密码/私钥口令等敏感凭据存于系统加密存储（Windows 凭据管理器），
+ * 以 profile:{id}:password / :passphrase 为键，见 api/credentials.ts。
+ */
 export interface SshProfile {
   id: string;
   alias: string;
@@ -8,10 +12,7 @@ export interface SshProfile {
   port: number;
   username: string;
   authMethod: AuthMethod;
-  /** 仅密码认证时存在；MVP 阶段明文存于本地，见 README 安全说明 */
-  password?: string;
   privateKeyPath?: string;
-  passphrase?: string;
   createdAt: number;
 }
 

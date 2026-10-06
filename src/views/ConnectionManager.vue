@@ -29,8 +29,11 @@ function openEdit(profile: SshProfile) {
   formOpen.value = true;
 }
 
-function handleSave(profile: SshProfile) {
-  connections.upsert(profile);
+function handleSave(
+  profile: SshProfile,
+  secrets: { password?: string; passphrase?: string },
+) {
+  void connections.upsert(profile, secrets);
   formOpen.value = false;
 }
 
@@ -144,7 +147,7 @@ function handleRemove(profile: SshProfile) {
         </div>
 
         <p class="px-4 pt-1 pb-4 text-center text-xs leading-5 text-faint">
-          MVP 阶段连接信息仅保存在本机；私钥与密码不会上传到任何服务器。
+          连接配置仅保存在本机；密码与私钥口令加密存于 Windows 凭据管理器，不会上传到任何服务器。
         </p>
       </div>
     </div>

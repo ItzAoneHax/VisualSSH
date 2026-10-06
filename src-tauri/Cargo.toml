@@ -27,6 +27,11 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 # 跨平台用户配置目录（known_hosts 等落到 %APPDATA%/visualssh）
 dirs = "7"
+# 凭据加密存储（Windows 凭据管理器 / DPAPI）；只启用 v1 API + Windows 后端
+keyring = { version = "4", default-features = false, features = [
+    "v1",
+    "windows-native-keyring-store",
+] }
 
 [profile.release]
 codegen-units = 1
