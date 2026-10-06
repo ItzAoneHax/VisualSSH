@@ -26,7 +26,12 @@ if (build.status !== 0) {
 
 const source = join(root, "src-tauri", "target", "release", "VisualSSH.exe");
 const target = join(root, "VisualSSH.exe");
-copyFileSync(source, target);
+try {
+  copyFileSync(source, target);
+} catch {
+  console.error("✗ 无法写入根目录 VisualSSH.exe — 请先关闭正在运行的 VisualSSH 再执行 npm run exe");
+  process.exit(1);
+}
 
 const mb = statSync(target).size / 1024 / 1024;
 console.log(`\n✓ 单文件已就绪：${target}（${mb.toFixed(1)} MB）`);
