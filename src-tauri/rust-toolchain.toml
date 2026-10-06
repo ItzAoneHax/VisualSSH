@@ -1,3 +1,3 @@
 [toolchain]
-channel = "stable-msvc"
+channel = "stable"
 profile = "minimal"
