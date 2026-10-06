@@ -25,6 +25,11 @@
   --line: #0000000f; /* DividerStrokeColorDefault */
   --line-strong: #00000029; /* ControlStrokeColorSecondary（输入框描边） */
 
+  /* 浮层实体表面（ContentDialog/MenuFlyout：SolidBackgroundFillColorTertiary）
+     与描边（SurfaceStrokeColorFlyout）——必须不透明，否则背景文字透出 */
+  --surface-solid: #f9f9f9;
+  --stroke-flyout: #0000000f;
+
   --ink: #000000e4; /* TextFillColorPrimary */
   --dim: #0000009e; /* TextFillColorSecondary */
   --faint: #00000072; /* TextFillColorTertiary */
@@ -55,6 +60,9 @@
 
   --line: #ffffff15;
   --line-strong: #ffffff18;
+
+  --surface-solid: #282828;
+  --stroke-flyout: #00000033;
 
   --ink: #ffffff;
   --dim: #ffffffc5;

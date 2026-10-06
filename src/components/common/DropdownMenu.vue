@@ -41,8 +41,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         role="menu"
         class="absolute right-0 z-50 mt-1 min-w-44 rounded-lg p-1 shadow-xl"
         :style="{
-          background: 'var(--panel)',
-          border: '1px solid var(--line-strong)',
+          background: 'var(--surface-solid)',
+          border: '1px solid var(--stroke-flyout)',
         }"
       >
         <template v-for="item in items" :key="item.key">
