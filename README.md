@@ -108,8 +108,20 @@ npm run tauri dev  # 启动开发模式（自动拉起 Vite 与 Rust 核心）
 ### 构建发布包
 
 ```bash
-npm run tauri build   # 产物在 src-tauri/target/release/bundle/
+npm run tauri build   # 产物在 src-tauri/target/release/bundle/（含安装器）
 ```
+
+### 打包单文件 exe（推荐日常使用方式）
+
+```bash
+npm run exe
+```
+
+该命令完成「前端构建 → Rust release 编译」后，把可独立运行的
+**`VisualSSH.exe`（项目根目录）** 复制出来 —— 双击即可使用，无需安装；
+连接配置保存在本机，与开发模式共用同一份数据。
+
+> 运行要求：Windows 10/11 自带的 WebView2 运行时（系统默认已有）。
 
 ### 第一阶段验收路径
 
