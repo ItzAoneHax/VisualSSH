@@ -415,9 +415,9 @@ body {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium;
   }
 
-  /* 侧栏导航项（SidebarStyles：行高 32、圆角 4、图标 16、文字距 12） */
+  /* 侧栏导航项（SidebarStyles：行高 32、图标 16、文字距 12；悬浮高亮为直角矩形） */
   .nav-item {
-    @apply relative flex h-8 w-full items-center rounded-[4px] pr-2.5 pl-2 text-left text-sm text-ink transition-colors;
+    @apply relative flex h-8 w-full items-center pr-2.5 pl-2 text-left text-sm text-ink transition-colors;
   }
   .nav-item:hover {
     background: var(--fill-subtle);
