@@ -35,8 +35,10 @@ import ThemeToggle from "@/components/common/ThemeToggle.vue";
 import Breadcrumbs from "@/components/explorer/Breadcrumbs.vue";
 import ChmodDialog from "@/components/explorer/ChmodDialog.vue";
 import FileTable from "@/components/explorer/FileTable.vue";
+import EditorDrawer from "@/components/workspace/EditorDrawer.vue";
 import TransferCenter from "@/components/workspace/TransferCenter.vue";
 import { useConnectionsStore } from "@/stores/connections";
+import { useEditorStore } from "@/stores/editor";
 import { useExplorerStore } from "@/stores/explorer";
 import { useTransferStore } from "@/stores/transfer";
 import type { FileEntry } from "@/types";
@@ -49,6 +51,13 @@ const emit = defineEmits<{
 const connections = useConnectionsStore();
 const explorer = useExplorerStore();
 const transfers = useTransferStore();
+const editor = useEditorStore();
+
+/** 双击文本文件 → 打开编辑抽屉 */
+function onOpenFile(entry: FileEntry) {
+  const connectionId = connections.active?.connectionId;
+  if (connectionId) void editor.openEntry(entry, explorer.cwd, connectionId);
+}
 
 /** Files 快速跳转（对应侧栏驱动器/常用位置区） */
 const quickLinks = [
@@ -322,8 +331,8 @@ function onKeydown(e: KeyboardEvent) {
       </div>
     </aside>
 
-    <!-- 主列：地址行卡 + 文件区卡 + 状态栏 -->
-    <div class="flex min-w-0 flex-1 flex-col gap-1 p-2 pl-2.5">
+    <!-- 主列：地址行卡 + 文件区卡 + 编辑抽屉 + 状态栏 -->
+    <div class="flex min-w-0 flex-1 flex-col gap-1 p-2 pl-2.5" data-main-col>
       <!-- 地址行（Win11：后退/前进/刷新在地址栏左侧） -->
       <div
         class="flex h-12 shrink-0 items-center gap-1 rounded-lg px-1"
@@ -400,7 +409,7 @@ function onKeydown(e: KeyboardEvent) {
               重试
             </button>
           </div>
-          <FileTable @context-menu="onFileContextMenu" />
+          <FileTable @context-menu="onFileContextMenu" @open-file="onOpenFile" />
         </div>
 
         <!-- 拖拽悬停覆盖层：释放以上传到当前目录 -->
@@ -427,6 +436,9 @@ function onKeydown(e: KeyboardEvent) {
           </div>
         </div>
       </div>
+
+      <!-- 底部编辑抽屉 -->
+      <EditorDrawer />
 
       <!-- 状态栏（Files StatusBar：无传输元素，仅目录统计） -->
       <footer class="flex h-8 shrink-0 items-center justify-between px-3 text-xs text-dim">

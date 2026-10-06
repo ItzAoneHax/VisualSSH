@@ -10,6 +10,7 @@ const explorer = useExplorerStore();
 
 const emit = defineEmits<{
   contextMenu: [payload: { entry: FileEntry | null; x: number; y: number }];
+  openFile: [entry: FileEntry];
 }>();
 
 /** 就地编辑的实时值（重命名初值 = 原名，新建为空） */
@@ -93,6 +94,7 @@ function onRowClick(entry: FileEntry, e: MouseEvent) {
 
 function onRowDblClick(entry: FileEntry) {
   if (entry.kind === "dir") explorer.enter(entry.name);
+  else emit("openFile", entry);
 }
 
 /** 右键未选中项时先选中（资源管理器行为），再上报菜单位置 */

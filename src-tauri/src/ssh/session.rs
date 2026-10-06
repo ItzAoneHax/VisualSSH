@@ -7,6 +7,7 @@ use russh::keys::{HashAlg, PrivateKeyWithHashAlg};
 use russh_sftp::client::fs::File as RemoteFile;
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::{FileAttributes, OpenFlags};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::fs::{self, FileEntry};
 use super::known_hosts::KnownHosts;
@@ -325,6 +326,56 @@ impl SshSession {
             .set_metadata(path, attrs)
             .await
             .map_err(|e| Error::Sftp(format!("修改 {path} 权限失败: {e}")))
+    }
+
+    /// 读整个文本文件（UTF-8）。大小上限与前端预览限制一致。
+    pub async fn read_file(&self, path: &str) -> Result<String> {
+        const MAX_TEXT_BYTES: u64 = 2 * 1024 * 1024;
+        let size = self.file_size(path).await?;
+        if size > MAX_TEXT_BYTES {
+            return Err(Error::Sftp(format!("{path} 超过 2MB，不支持文本预览")));
+        }
+
+        let mut file = self.open_read(path).await?;
+        let mut buf = Vec::with_capacity(size as usize);
+        let mut chunk = vec![0u8; 64 * 1024];
+        loop {
+            let n = file
+                .read(&mut chunk)
+                .await
+                .map_err(|e| Error::Sftp(format!("读取 {path} 失败: {e}")))?;
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            if buf.len() as u64 > MAX_TEXT_BYTES {
+                return Err(Error::Sftp(format!("{path} 超过 2MB，不支持文本预览")));
+            }
+        }
+        String::from_utf8(buf)
+            .map_err(|_| Error::Sftp(format!("{path} 不是 UTF-8 文本，无法预览")))
+    }
+
+    /// 原子写：先写同目录临时文件，close 确认落盘后 rename 替换目标。
+    pub async fn write_file(&self, path: &str, content: &str) -> Result<()> {
+        let tmp_path = format!("{path}.vsshtmp");
+        let mut tmp = match self.open_write(&tmp_path).await {
+            Ok(f) => f,
+            Err(e) => return Err(e),
+        };
+        if let Err(e) = tmp.write_all(content.as_bytes()).await {
+            let _ = self.sftp.remove_file(&tmp_path).await;
+            return Err(Error::Sftp(format!("写入 {path} 失败: {e}")));
+        }
+        // close 等待远端确认全部写入，再原子替换
+        if let Err(e) = tmp.close().await {
+            let _ = self.sftp.remove_file(&tmp_path).await;
+            return Err(Error::Sftp(format!("写入 {path} 失败: {e}")));
+        }
+        self.sftp
+            .rename(&tmp_path, path)
+            .await
+            .map_err(|e| Error::Sftp(format!("替换 {path} 失败: {e}")))
     }
 }
 

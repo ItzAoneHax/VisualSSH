@@ -62,6 +62,20 @@ export function chmodSsh(
   return invoke("ssh_chmod", { connectionId, path, mode });
 }
 
+/** 读文本文件（UTF-8，≤2MB） */
+export function readFileSsh(connectionId: string, path: string): Promise<string> {
+  return invoke("ssh_read_file", { connectionId, path });
+}
+
+/** 原子写回（同目录临时文件 + rename） */
+export function writeFileSsh(
+  connectionId: string,
+  path: string,
+  content: string,
+): Promise<void> {
+  return invoke("ssh_write_file", { connectionId, path, content });
+}
+
 export function disconnectSsh(connectionId: string): Promise<void> {
   return invoke("ssh_disconnect", { connectionId });
 }

@@ -272,6 +272,39 @@ pub async fn ssh_chmod(
         .map_err(|_| Error::Timeout)?
 }
 
+/// 读文本文件（UTF-8，≤2MB），供编辑抽屉加载。
+#[tauri::command]
+pub async fn ssh_read_file(
+    connection_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<String> {
+    let handle = state
+        .get(&connection_id)
+        .ok_or_else(|| Error::NoSession(connection_id.clone()))?;
+    let session = handle.session.lock().await;
+    tokio::time::timeout(IO_TIMEOUT, session.read_file(&path))
+        .await
+        .map_err(|_| Error::Timeout)?
+}
+
+/// 原子写回：同目录临时文件落盘后 rename 替换。
+#[tauri::command]
+pub async fn ssh_write_file(
+    connection_id: String,
+    path: String,
+    content: String,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let handle = state
+        .get(&connection_id)
+        .ok_or_else(|| Error::NoSession(connection_id.clone()))?;
+    let session = handle.session.lock().await;
+    tokio::time::timeout(IO_TIMEOUT, session.write_file(&path, &content))
+        .await
+        .map_err(|_| Error::Timeout)?
+}
+
 /// 断开并移除会话池中的连接；同时取消该连接的全部传输。
 #[tauri::command]
 pub async fn ssh_disconnect(

@@ -19,6 +19,8 @@ pub fn run() {
             commands::ssh_rename,
             commands::ssh_delete,
             commands::ssh_chmod,
+            commands::ssh_read_file,
+            commands::ssh_write_file,
             commands::ssh_disconnect,
             commands::ssh_trust_host,
             commands::credentials::credential_get,

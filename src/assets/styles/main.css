@@ -45,6 +45,15 @@
 
   --row-hover: #00000009;
   --row-active: #0070cb2e;
+
+  /* CodeMirror 语法高亮（近似 VS 亮色 code 主题） */
+  --cm-keyword: #0000c0;
+  --cm-string: #a31515;
+  --cm-number: #098658;
+  --cm-comment: #008000;
+  --cm-function: #795e26;
+  --cm-property: #001080;
+  --cm-type: #267f99;
 }
 
 .dark {
@@ -78,6 +87,15 @@
 
   --row-hover: #ffffff0f;
   --row-active: #50c0ff2e;
+
+  /* CodeMirror 语法高亮（近似 VS Dark） */
+  --cm-keyword: #569cd6;
+  --cm-string: #ce9178;
+  --cm-number: #b5cea8;
+  --cm-comment: #6a9955;
+  --cm-function: #dcdcaa;
+  --cm-property: #9cdcfe;
+  --cm-type: #4ec9b0;
 }
 
 @theme inline {
