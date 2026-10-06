@@ -11,11 +11,13 @@ import {
   FolderTree,
   HardDrive,
   House,
+  Lock,
   LogOut,
   MoreHorizontal,
   Pencil,
   RefreshCw,
   ScrollText,
+  Trash2,
   TriangleAlert,
 } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -23,8 +25,10 @@ import { nextTick } from "vue";
 
 import ContextMenu from "@/components/common/ContextMenu.vue";
 import DropdownMenu, { type MenuItem } from "@/components/common/DropdownMenu.vue";
+import Modal from "@/components/common/Modal.vue";
 import ThemeToggle from "@/components/common/ThemeToggle.vue";
 import Breadcrumbs from "@/components/explorer/Breadcrumbs.vue";
+import ChmodDialog from "@/components/explorer/ChmodDialog.vue";
 import FileTable from "@/components/explorer/FileTable.vue";
 import { useConnectionsStore } from "@/stores/connections";
 import { useExplorerStore } from "@/stores/explorer";
@@ -94,6 +98,20 @@ const ctxMenu = ref<{ open: boolean; x: number; y: number; entry: FileEntry | nu
   entry: null,
 });
 
+/** 删除确认与权限编辑的目标条目 */
+const deleteTarget = ref<FileEntry | null>(null);
+const chmodTarget = ref<FileEntry | null>(null);
+
+function requestDelete(entry: FileEntry | null) {
+  if (entry) deleteTarget.value = entry;
+}
+
+function confirmDelete() {
+  const target = deleteTarget.value;
+  deleteTarget.value = null;
+  if (target) explorer.deleteEntry(target.name, target.kind === "dir");
+}
+
 function onFileContextMenu(payload: { entry: FileEntry | null; x: number; y: number }) {
   ctxMenu.value = { open: true, ...payload };
 }
@@ -125,6 +143,9 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
     { key: "copyPath", label: "复制路径", icon: ClipboardCopy },
     { key: "sep2", label: "", separator: true },
     { key: "rename", label: "重命名", icon: Pencil },
+    { key: "delete", label: "删除", icon: Trash2 },
+    { key: "sep3", label: "", separator: true },
+    { key: "chmod", label: "修改权限", icon: Lock },
   );
   return items;
 });
@@ -152,6 +173,12 @@ async function onCtxMenuSelect(key: string) {
     case "rename":
       explorer.startRename(entry.name);
       break;
+    case "delete":
+      requestDelete(entry);
+      break;
+    case "chmod":
+      chmodTarget.value = entry;
+      break;
   }
 }
 
@@ -166,7 +193,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
 });
 
-/** F2 重命名选中项；Alt+↑ 上一级 / Alt+← 后退 / Alt+→ 前进（资源管理器快捷键） */
+/** F2 重命名、Delete 删除选中项；Alt+↑ 上一级 / Alt+← 后退 / Alt+→ 前进 */
 function onKeydown(e: KeyboardEvent) {
   // 就地编辑/表单输入时快捷键让位
   if (
@@ -178,6 +205,11 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === "F2" && explorer.selectedName) {
     e.preventDefault();
     explorer.startRename(explorer.selectedName);
+    return;
+  }
+  if (e.key === "Delete" && explorer.selectedName) {
+    e.preventDefault();
+    requestDelete(explorer.entryByName(explorer.selectedName));
     return;
   }
   if (!e.altKey) return;
@@ -332,6 +364,39 @@ function onKeydown(e: KeyboardEvent) {
       :items="ctxMenuItems"
       @select="onCtxMenuSelect"
       @close="ctxMenu.open = false"
+    />
+
+    <!-- 删除确认：远程删除不可恢复，红色主按钮 -->
+    <Modal :open="!!deleteTarget" title="删除确认" @close="deleteTarget = null">
+      <div v-if="deleteTarget" class="flex flex-col gap-4">
+        <p class="text-sm leading-6">
+          确定要删除「<span class="font-semibold">{{ deleteTarget.name }}</span>
+          {{ deleteTarget.kind === "dir" ? "」文件夹吗？其中的所有内容都将被一并删除。" : "」吗？" }}
+        </p>
+        <p class="text-xs text-faint">
+          路径 {{ explorer.cwd }}/{{ deleteTarget.name }} — 远程删除无法撤销。
+        </p>
+        <footer class="mt-1 flex justify-end gap-2">
+          <button type="button" class="btn-secondary" @click="deleteTarget = null">
+            取消
+          </button>
+          <button type="button" class="btn-danger" @click="confirmDelete">
+            删除
+          </button>
+        </footer>
+      </div>
+    </Modal>
+
+    <!-- 修改权限：3×3 勾选 + rwx/八进制实时预览 -->
+    <ChmodDialog
+      :open="!!chmodTarget"
+      :entry="chmodTarget"
+      @close="chmodTarget = null"
+      @apply="(mode) => {
+        const target = chmodTarget;
+        chmodTarget = null;
+        if (target) explorer.chmodEntry(target.name, mode);
+      }"
     />
   </div>
 </template>
