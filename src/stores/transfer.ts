@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 import {
   cancelTransfer,
@@ -143,6 +143,15 @@ export const useTransferStore = defineStore("transfer", () => {
     remotePath: string,
     localPath: string,
   ) {
+    await startDownloadTo(connectionId, remotePath, localPath);
+  }
+
+  /** 下载并入队，返回 transferId（剪贴板编排需要等待其完成） */
+  async function startDownloadTo(
+    connectionId: string,
+    remotePath: string,
+    localPath: string,
+  ): Promise<string> {
     const id = crypto.randomUUID();
     const fileName = remoteBaseName(remotePath);
     rows.value.unshift({
@@ -169,6 +178,31 @@ export const useTransferStore = defineStore("transfer", () => {
         error: e instanceof Error ? e.message : String(e),
       });
     }
+    return id;
+  }
+
+  /** 等待一组传输全部到达终态；全部成功返回 true（事件驱动，无轮询开销） */
+  function waitAllDone(ids: string[]): Promise<boolean> {
+    return new Promise((resolve) => {
+      const terminal = new Map<string, string>();
+      const check = () => {
+        let ready = true;
+        for (const id of ids) {
+          const row = rows.value.find((r) => r.id === id);
+          if (!row || !["done", "failed", "cancelled"].includes(row.status)) {
+            ready = false;
+            break;
+          }
+          terminal.set(id, row.status);
+        }
+        if (ready) {
+          unwatch();
+          resolve([...terminal.values()].every((s) => s === "done"));
+        }
+      };
+      const unwatch = watch(rows, check, { deep: true });
+      check();
+    });
   }
 
   /** 取消：状态由后端事件回写（≤150ms 轮询） */
@@ -213,6 +247,8 @@ export const useTransferStore = defineStore("transfer", () => {
     applyEvent,
     startUpload,
     startDownload,
+    startDownloadTo,
+    waitAllDone,
     cancel,
     removeRow,
     clearFinished,

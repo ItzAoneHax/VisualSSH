@@ -43,6 +43,9 @@ pub enum Error {
     #[error("终端 — {0}")]
     Terminal(String),
 
+    #[error("剪贴板 — {0}")]
+    Clipboard(String),
+
     #[error("连接不存在或已断开 — {0}")]
     NoSession(String),
 

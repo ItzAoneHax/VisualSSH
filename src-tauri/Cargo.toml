@@ -25,6 +25,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 tauri-plugin-dialog = "2"
 # 终端数据通道的事件负载编码（二进制 → JSON 安全字符串）
 base64 = "0.22"
+# 系统剪贴板文件列表（CF_HDROP，跨端 Ctrl+C/V 文件传递）
+clipboard-win = "5"
 # 纯 Rust 实现的 SSH 协议栈，无 OpenSSL 依赖，天然跨平台
 russh = "0.64"
 russh-sftp = "3"
