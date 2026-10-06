@@ -5,10 +5,6 @@ import { listDir } from "@/api/ssh";
 import type { FileEntry } from "@/types";
 import { joinPath, parentPath } from "@/utils/format";
 
-/**
- * 远程文件浏览器状态。
- * 连接建立后由 Workspace 视图调用 open(rootPath) 完成首次加载。
- */
 export type SortKey = "name" | "mtime" | "kind" | "size" | "permissions";
 
 export const SORT_KEYS: SortKey[] = [
@@ -19,6 +15,10 @@ export const SORT_KEYS: SortKey[] = [
   "permissions",
 ];
 
+/**
+ * 远程文件浏览器状态（单工作区）。
+ * 含浏览历史栈，支持资源管理器语义的后退/前进。
+ */
 export const useExplorerStore = defineStore("explorer", () => {
   const connectionId = ref("");
   const cwd = ref("/");
@@ -31,6 +31,16 @@ export const useExplorerStore = defineStore("explorer", () => {
   const sortKey = ref<SortKey>("name");
   const sortAsc = ref(true);
 
+  /** 浏览历史（资源管理器 ←/→） */
+  const history = ref<string[]>([]);
+  const historyIndex = ref(-1);
+  let viaHistory = false;
+
+  const canBack = computed(() => historyIndex.value > 0);
+  const canForward = computed(
+    () => historyIndex.value < history.value.length - 1,
+  );
+
   async function open(path: string) {
     if (!connectionId.value || loading.value) return;
     loading.value = true;
@@ -39,12 +49,32 @@ export const useExplorerStore = defineStore("explorer", () => {
     try {
       entries.value = await listDir(connectionId.value, path);
       cwd.value = path;
+      if (!viaHistory) {
+        // 常规导航：截断前进分支再入栈
+        history.value = [...history.value.slice(0, historyIndex.value + 1), path];
+        historyIndex.value = history.value.length - 1;
+      }
     } catch (e) {
       // 失败时保留旧目录内容，仅呈现错误横幅
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
+      viaHistory = false;
       loading.value = false;
     }
+  }
+
+  function back() {
+    if (!canBack.value || loading.value) return;
+    viaHistory = true;
+    historyIndex.value -= 1;
+    void open(history.value[historyIndex.value]);
+  }
+
+  function forward() {
+    if (!canForward.value || loading.value) return;
+    viaHistory = true;
+    historyIndex.value += 1;
+    void open(history.value[historyIndex.value]);
   }
 
   function enter(name: string) {
@@ -65,6 +95,9 @@ export const useExplorerStore = defineStore("explorer", () => {
     entries.value = [];
     error.value = null;
     selectedName.value = null;
+    history.value = [];
+    historyIndex.value = -1;
+    viaHistory = false;
     void open(rootPath);
   }
 
@@ -73,6 +106,8 @@ export const useExplorerStore = defineStore("explorer", () => {
     entries.value = [];
     cwd.value = "/";
     error.value = null;
+    history.value = [];
+    historyIndex.value = -1;
   }
 
   const visibleEntries = computed(() => {
@@ -125,9 +160,13 @@ export const useExplorerStore = defineStore("explorer", () => {
     selectedName,
     sortKey,
     sortAsc,
+    canBack,
+    canForward,
     visibleEntries,
     breadcrumbSegments,
     open,
+    back,
+    forward,
     enter,
     refresh,
     up,

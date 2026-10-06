@@ -6,6 +6,7 @@ import ConnectionCard from "@/components/connection/ConnectionCard.vue";
 import ConnectionForm from "@/components/connection/ConnectionForm.vue";
 import ThemeToggle from "@/components/common/ThemeToggle.vue";
 import { useConnectionsStore } from "@/stores/connections";
+
 import type { SshProfile } from "@/types";
 
 const connections = useConnectionsStore();

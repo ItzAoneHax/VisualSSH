@@ -2,7 +2,6 @@
 import { Copy, Minus, Square, X } from "@lucide/vue";
 import { onBeforeUnmount, onMounted, ref } from "vue";
 
-/** 非表格下的默认标题高度 */
 const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 const maximized = ref(false);

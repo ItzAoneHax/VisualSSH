@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {
   ArrowLeft,
-  ArrowUp,
+  ArrowRight,
   ClipboardCopy,
   Copy,
   Eye,
@@ -43,6 +43,33 @@ const quickLinks = [
 ];
 
 const menuOpen = ref(false);
+
+const menuItems = computed<MenuItem[]>(() => [
+  { key: "refresh", label: "刷新", icon: RefreshCw },
+  {
+    key: "hidden",
+    label: explorer.showHidden ? "隐藏点开头的项目" : "显示点开头的项目",
+    icon: Eye,
+    checked: explorer.showHidden,
+  },
+  { key: "sep", label: "", separator: true },
+  { key: "disconnect", label: "断开连接", icon: LogOut, danger: true },
+]);
+
+function onMenuSelect(key: string) {
+  menuOpen.value = false;
+  switch (key) {
+    case "refresh":
+      explorer.refresh();
+      break;
+    case "hidden":
+      explorer.showHidden = !explorer.showHidden;
+      break;
+    case "disconnect":
+      emit("disconnect");
+      break;
+  }
+}
 
 /** 文件区右键菜单状态 */
 const ctxMenu = ref<{ open: boolean; x: number; y: number; entry: FileEntry | null }>({
@@ -103,33 +130,6 @@ async function onCtxMenuSelect(key: string) {
   }
 }
 
-const menuItems = computed<MenuItem[]>(() => [
-  { key: "refresh", label: "刷新", icon: RefreshCw },
-  {
-    key: "hidden",
-    label: explorer.showHidden ? "隐藏点开头的项目" : "显示点开头的项目",
-    icon: Eye,
-    checked: explorer.showHidden,
-  },
-  { key: "sep", label: "", separator: true },
-  { key: "disconnect", label: "断开连接", icon: LogOut, danger: true },
-]);
-
-function onMenuSelect(key: string) {
-  menuOpen.value = false;
-  switch (key) {
-    case "refresh":
-      explorer.refresh();
-      break;
-    case "hidden":
-      explorer.showHidden = !explorer.showHidden;
-      break;
-    case "disconnect":
-      emit("disconnect");
-      break;
-  }
-}
-
 onMounted(() => {
   if (connections.active) {
     explorer.reset(connections.active.connectionId, connections.active.rootPath);
@@ -141,11 +141,18 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
 });
 
-/** Alt+↑ 返回上一级 */
+/** Alt+↑ 上一级 / Alt+← 后退 / Alt+→ 前进（资源管理器快捷键） */
 function onKeydown(e: KeyboardEvent) {
-  if (e.altKey && e.key === "ArrowUp") {
+  if (!e.altKey) return;
+  if (e.key === "ArrowUp") {
     e.preventDefault();
     explorer.up();
+  } else if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    explorer.back();
+  } else if (e.key === "ArrowRight") {
+    e.preventDefault();
+    explorer.forward();
   }
 }
 </script>
@@ -191,9 +198,9 @@ function onKeydown(e: KeyboardEvent) {
       </div>
     </aside>
 
-    <!-- 主列：工具栏卡 + 文件区卡 + 状态栏（Files 双卡结构，间距 4） -->
+    <!-- 主列：地址行卡 + 文件区卡 + 状态栏 -->
     <div class="flex min-w-0 flex-1 flex-col gap-1 p-2 pl-2.5">
-      <!-- 工具栏：OverlayCornerRadius 8、内边距 4、按钮间距 4 -->
+      <!-- 地址行（Win11：后退/前进/刷新在地址栏左侧） -->
       <div
         class="flex h-12 shrink-0 items-center gap-1 rounded-lg px-1"
         :style="{ background: 'var(--toolbar)', border: '1px solid var(--line)' }"
@@ -201,25 +208,27 @@ function onKeydown(e: KeyboardEvent) {
         <button
           type="button"
           class="btn-icon"
-          title="返回主页"
-          aria-label="返回主页"
-          @click="emit('disconnect')"
+          :disabled="!explorer.canBack || explorer.loading"
+          title="后退（Alt+←）"
+          aria-label="后退"
+          @click="explorer.back()"
         >
           <ArrowLeft :size="16" />
         </button>
         <button
           type="button"
           class="btn-icon"
-          :disabled="explorer.cwd === '/' || explorer.loading"
-          title="上一级（Alt+↑）"
-          aria-label="上一级"
-          @click="explorer.up()"
+          :disabled="!explorer.canForward || explorer.loading"
+          title="前进（Alt+→）"
+          aria-label="前进"
+          @click="explorer.forward()"
         >
-          <ArrowUp :size="16" />
+          <ArrowRight :size="16" />
         </button>
         <button
           type="button"
           class="btn-icon"
+          :disabled="explorer.loading"
           title="刷新"
           aria-label="刷新"
           @click="explorer.refresh()"
