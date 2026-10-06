@@ -1,57 +1,92 @@
 @import "tailwindcss";
-@import "@fontsource-variable/space-grotesk";
 @import "@fontsource-variable/jetbrains-mono";
 
 /* 按类切换暗色（index.html 的内联脚本在首帧前挂载 .dark） */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ---- 语义色板：一套 token，明暗两套值 ---- */
+/* ---- Fluent 2 色板（值取自 Files 源码 + WinUI 主题资源）----
+   注意：XAML 文档为 #AARRGGBB（alpha 在前），此处已转置为 CSS 的 #RRGGBBAA。
+   分层：bg = 窗口底色(Mica 固态近似)；toolbar/file area = 半透明卡片叠在底色上，
+   与 Files 的 Layer/Card 体系一致（保留 alpha，由 CSS 与底色自然混合）。 */
 :root {
-  --bg: #f4f5f8;
-  --panel: #ffffff;
-  --panel-2: #eceef4;
-  --line: #dce0ea;
-  --ink: #1a2230;
-  --dim: #5c6678;
-  --faint: #8b94a6;
-  --accent: #3d6dfa;
-  --accent-2: #7a5cff;
-  --live: #149e5a;
-  --warn: #b2620b;
-  --danger: #d43d51;
-  --folder: #b97a15;
-  --row-hover: #eef1f8;
-  --row-active: #e4eafc;
+  --bg: #f3f3f3;
+
+  /* 卡片面（工具栏/文件区/弹窗）：CardBackgroundFillColorDefault + FileArea */
+  --panel: #fcfcfcc0;
+  --toolbar: #ffffffb3;
+  /* 侧栏层：LayerOnMicaBaseAltFillColorDefault */
+  --sidebar: #ffffffb3;
+
+  /* 填充（Fluent Subtle/Control 系列） */
+  --fill-subtle: #00000009; /* 悬停 */
+  --fill-pressed: #00000006; /* 按下 */
+  --fill-control: #ffffffb3; /* 选中 */
+
+  --line: #0000000f; /* DividerStrokeColorDefault */
+  --line-strong: #00000029; /* ControlStrokeColorSecondary（输入框描边） */
+
+  --ink: #000000e4; /* TextFillColorPrimary */
+  --dim: #0000009e; /* TextFillColorSecondary */
+  --faint: #00000072; /* TextFillColorTertiary */
+
+  /* Files App.Theme.FillColorAttention */
+  --accent: #0070cb;
+  --accent-fg: #ffffff;
+
+  --live: #0f7b0f;
+  --warn: #9d5d00;
+  --danger: #c42b1c;
+  --folder: #e8a93d;
+
+  --row-hover: #00000009;
+  --row-active: #0070cb2e;
 }
 
 .dark {
-  --bg: #0a0e14;
-  --panel: #101623;
-  --panel-2: #172033;
-  --line: #212c42;
-  --ink: #e6eaf2;
-  --dim: #8a94a6;
-  --faint: #5b6577;
-  --accent: #5b8cff;
-  --accent-2: #9b8bff;
-  --live: #34d58b;
-  --warn: #f5b860;
-  --danger: #f87c7c;
-  --folder: #f2bd69;
-  --row-hover: #151d2e;
-  --row-active: #1a2540;
+  --bg: #202020;
+
+  --panel: #ffffff0d;
+  --toolbar: #ffffff0d;
+  --sidebar: #3a3a3a73;
+
+  --fill-subtle: #ffffff0f;
+  --fill-pressed: #ffffff0a;
+  --fill-control: #ffffff0f;
+
+  --line: #ffffff15;
+  --line-strong: #ffffff18;
+
+  --ink: #ffffff;
+  --dim: #ffffffc5;
+  --faint: #ffffff87;
+
+  --accent: #50c0ff;
+  --accent-fg: #0e0e0e;
+
+  --live: #6ccb5f;
+  --warn: #fcc548;
+  --danger: #ff99a4;
+  --folder: #edbb52;
+
+  --row-hover: #ffffff0f;
+  --row-active: #50c0ff2e;
 }
 
 @theme inline {
   --color-bg: var(--bg);
   --color-panel: var(--panel);
-  --color-panel-2: var(--panel-2);
+  --color-toolbar: var(--toolbar);
+  --color-sidebar: var(--sidebar);
+  --color-fill-subtle: var(--fill-subtle);
+  --color-fill-pressed: var(--fill-pressed);
+  --color-fill-control: var(--fill-control);
   --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
   --color-ink: var(--ink);
   --color-dim: var(--dim);
   --color-faint: var(--faint);
   --color-accent: var(--accent);
-  --color-accent-2: var(--accent-2);
+  --color-accent-fg: var(--accent-fg);
   --color-live: var(--live);
   --color-warn: var(--warn);
   --color-danger: var(--danger);
@@ -59,8 +94,9 @@
   --color-row-hover: var(--row-hover);
   --color-row-active: var(--row-active);
 
-  --font-display: "Space Grotesk Variable", "Segoe UI", "Microsoft YaHei UI",
-    "PingFang SC", system-ui, sans-serif;
+  /* Files 使用 Segoe UI Variable（非 Windows 平台回退系统 UI 字体） */
+  --font-display: "Segoe UI Variable Text", "Segoe UI", -apple-system,
+    "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", "Cascadia Code", Consolas, ui-monospace,
     monospace;
 }
@@ -72,22 +108,25 @@ body,
   height: 100%;
 }
 
+/* WinUI 类型阶梯基准：Body 14 */
 body {
   @apply bg-bg font-display text-ink antialiased;
+  font-size: 14px;
 }
 
-/* 细滚动条，融入面板色 */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
+  scrollbar-color: var(--line-strong) transparent;
 }
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 *::-webkit-scrollbar-thumb {
-  background: var(--line);
-  border-radius: 4px;
+  background: var(--line-strong);
+  border-radius: 5px;
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
 *::-webkit-scrollbar-track {
   background: transparent;
@@ -97,92 +136,130 @@ body {
   background: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
-/* ---- 组件级工具类 ---- */
+/* ---- Fluent 组件基类 ---- */
 @layer components {
+  /* 强调按钮（WinUI AccentButton：32 高、4 圆角） */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold text-white transition-colors;
-    background-image: linear-gradient(135deg, var(--accent), var(--accent-2));
+    @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-[4px] px-3 text-sm font-semibold transition-[filter,opacity];
+    background: var(--accent);
+    color: var(--accent-fg);
   }
   .btn-primary:hover {
-    filter: brightness(1.08);
+    filter: brightness(1.06);
   }
   .btn-primary:active {
-    filter: brightness(0.95);
+    filter: brightness(0.93);
   }
   .btn-primary:disabled {
-    @apply cursor-not-allowed opacity-50;
+    @apply cursor-not-allowed opacity-45;
     filter: none;
   }
 
-  .btn-ghost {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-line bg-transparent px-3 py-2 text-sm text-dim transition-colors hover:bg-panel-2 hover:text-ink;
+  /* 次级按钮（Control 填充） */
+  .btn-secondary {
+    @apply inline-flex h-8 items-center justify-center gap-1.5 rounded-[4px] px-3 text-sm font-medium text-ink transition-colors;
+    background: var(--fill-control);
   }
-  .btn-icon {
-    @apply inline-flex h-8 w-8 items-center justify-center rounded-lg text-dim transition-colors hover:bg-panel-2 hover:text-ink;
+  .btn-secondary:hover {
+    background: color-mix(in srgb, var(--ink) 10%, transparent);
   }
 
+  /* 工具栏图标按钮（Files ToolbarButton Small：32×32、4 圆角、Subtle 悬停） */
+  .btn-icon {
+    @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[4px] text-dim transition-colors;
+  }
+  .btn-icon:hover {
+    background: var(--fill-subtle);
+    color: var(--ink);
+  }
+  .btn-icon:active {
+    background: var(--fill-pressed);
+  }
+  .btn-icon:disabled {
+    @apply cursor-not-allowed opacity-40;
+    background: transparent;
+  }
+
+  /* Fluent 输入框：1px 描边 + 2px 底边，聚焦变强调色 */
   .field-label {
-    @apply mb-1.5 block text-[11px] font-semibold tracking-[0.08em] text-faint uppercase;
+    @apply mb-1.5 block text-xs font-medium text-dim;
   }
   .field-input {
-    @apply w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm text-ink transition outline-none;
+    @apply w-full rounded-[4px] px-3 py-1.5 text-sm text-ink outline-none;
+    background: var(--fill-control);
+    border: 1px solid var(--line-strong);
+    border-bottom-width: 2px;
+  }
+  .field-input:hover {
+    border-color: var(--faint);
+    border-bottom-color: var(--faint);
   }
   .field-input:focus {
-    @apply border-accent;
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+    border-color: var(--accent);
+    border-bottom-color: var(--accent);
+    background: var(--panel);
   }
 
   .chip {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium;
   }
-}
 
-/* 终端光标（工作区路径尾） */
-@keyframes cursor-blink {
-  0%,
-  49% {
-    opacity: 1;
+  /* 侧栏导航项（SidebarStyles：行高 32、圆角 4、图标 16、文字距 12） */
+  .nav-item {
+    @apply relative flex h-8 w-full items-center rounded-[4px] pr-2.5 pl-2 text-left text-sm text-ink transition-colors;
   }
-  50%,
-  100% {
-    opacity: 0;
+  .nav-item:hover {
+    background: var(--fill-subtle);
   }
-}
-.cursor-blink {
-  animation: cursor-blink 1.1s steps(1) infinite;
+  .nav-item:active {
+    background: var(--fill-pressed);
+  }
+  .nav-item.active {
+    background: var(--fill-control);
+  }
+  .nav-item.active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    translate: 0 -50%;
+    width: 3px;
+    height: 16px;
+    border-radius: 2px;
+    background: var(--accent);
+  }
 }
 
 /* 视图切换：连接管理器 ⇄ 工作区 */
 .view-enter-active {
-  transition:
-    opacity 0.22s ease,
-    transform 0.22s ease;
+  transition: opacity 0.15s ease;
 }
 .view-leave-active {
-  transition:
-    opacity 0.16s ease,
-    transform 0.16s ease;
+  transition: opacity 0.1s ease;
 }
-.view-enter-from {
-  opacity: 0;
-  transform: translateY(8px) scale(0.995);
-}
+.view-enter-from,
 .view-leave-to {
   opacity: 0;
-  transform: translateY(-6px) scale(0.995);
+}
+
+/* 弹窗与菜单进出场 */
+.popup-enter-active,
+.popup-leave-active {
+  transition:
+    opacity 0.1s ease,
+    transform 0.1s ease;
+}
+.popup-enter-from,
+.popup-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cursor-blink {
-    animation: none;
-  }
   .view-enter-active,
-  .view-leave-active {
-    transition: opacity 0.1s ease;
-    transform: none;
-  }
-  .view-enter-from,
-  .view-leave-to {
-    transform: none;
+  .view-leave-active,
+  .popup-enter-active,
+  .popup-leave-active {
+    transition: none;
   }
 }
