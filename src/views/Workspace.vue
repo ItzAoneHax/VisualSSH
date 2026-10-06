@@ -5,17 +5,21 @@ import {
   ClipboardCopy,
   Copy,
   Eye,
+  FilePlus,
   FolderOpen,
+  FolderPlus,
   FolderTree,
   HardDrive,
   House,
   LogOut,
   MoreHorizontal,
+  Pencil,
   RefreshCw,
   ScrollText,
   TriangleAlert,
 } from "@lucide/vue";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { nextTick } from "vue";
 
 import ContextMenu from "@/components/common/ContextMenu.vue";
 import DropdownMenu, { type MenuItem } from "@/components/common/DropdownMenu.vue";
@@ -43,6 +47,17 @@ const quickLinks = [
 ];
 
 const menuOpen = ref(false);
+
+/** 文件区滚动容器：进入新目录回顶部；原地刷新（文件操作后）保持滚动 */
+const fileAreaRef = ref<HTMLElement | null>(null);
+watch(
+  () => explorer.cwd,
+  () => {
+    void nextTick(() => {
+      if (fileAreaRef.value) fileAreaRef.value.scrollTop = 0;
+    });
+  },
+);
 
 const menuItems = computed<MenuItem[]>(() => [
   { key: "refresh", label: "刷新", icon: RefreshCw },
@@ -87,8 +102,11 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
   const entry = ctxMenu.value.entry;
   if (!entry) {
     return [
-      { key: "refresh", label: "刷新", icon: RefreshCw },
+      { key: "newDir", label: "新建文件夹", icon: FolderPlus },
+      { key: "newFile", label: "新建文件", icon: FilePlus },
       { key: "sep", label: "", separator: true },
+      { key: "refresh", label: "刷新", icon: RefreshCw },
+      { key: "sep2", label: "", separator: true },
       {
         key: "hidden",
         label: explorer.showHidden ? "隐藏点开头的项目" : "显示点开头的项目",
@@ -105,6 +123,8 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
   items.push(
     { key: "copyName", label: "复制名称", icon: Copy },
     { key: "copyPath", label: "复制路径", icon: ClipboardCopy },
+    { key: "sep2", label: "", separator: true },
+    { key: "rename", label: "重命名", icon: Pencil },
   );
   return items;
 });
@@ -113,7 +133,9 @@ async function onCtxMenuSelect(key: string) {
   const entry = ctxMenu.value.entry;
   ctxMenu.value = { ...ctxMenu.value, open: false };
   if (!entry) {
-    if (key === "refresh") explorer.refresh();
+    if (key === "newDir") explorer.startCreate("dir");
+    else if (key === "newFile") explorer.startCreate("file");
+    else if (key === "refresh") explorer.refresh();
     else if (key === "hidden") explorer.showHidden = !explorer.showHidden;
     return;
   }
@@ -126,6 +148,9 @@ async function onCtxMenuSelect(key: string) {
       break;
     case "copyPath":
       await copyText(joinPath(explorer.cwd, entry.name));
+      break;
+    case "rename":
+      explorer.startRename(entry.name);
       break;
   }
 }
@@ -141,8 +166,20 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
 });
 
-/** Alt+↑ 上一级 / Alt+← 后退 / Alt+→ 前进（资源管理器快捷键） */
+/** F2 重命名选中项；Alt+↑ 上一级 / Alt+← 后退 / Alt+→ 前进（资源管理器快捷键） */
 function onKeydown(e: KeyboardEvent) {
+  // 就地编辑/表单输入时快捷键让位
+  if (
+    e.target instanceof HTMLInputElement ||
+    e.target instanceof HTMLTextAreaElement
+  ) {
+    return;
+  }
+  if (e.key === "F2" && explorer.selectedName) {
+    e.preventDefault();
+    explorer.startRename(explorer.selectedName);
+    return;
+  }
   if (!e.altKey) return;
   if (e.key === "ArrowUp") {
     e.preventDefault();
@@ -257,6 +294,7 @@ function onKeydown(e: KeyboardEvent) {
 
       <!-- 文件区：FileArea 卡（8 圆角 + 1px 描边） -->
       <div
+        ref="fileAreaRef"
         class="min-h-0 flex-1 overflow-y-auto rounded-lg"
         :style="{ background: 'var(--panel)', border: '1px solid var(--line)' }"
       >

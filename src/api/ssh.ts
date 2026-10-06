@@ -30,6 +30,38 @@ export function listDir(
   return invoke("ssh_list_dir", { connectionId, path });
 }
 
+export function mkdirSsh(connectionId: string, path: string): Promise<void> {
+  return invoke("ssh_mkdir", { connectionId, path });
+}
+
+export function touchSsh(connectionId: string, path: string): Promise<void> {
+  return invoke("ssh_touch", { connectionId, path });
+}
+
+export function renameSsh(
+  connectionId: string,
+  oldPath: string,
+  newPath: string,
+): Promise<void> {
+  return invoke("ssh_rename", { connectionId, oldPath, newPath });
+}
+
+export function deleteSsh(
+  connectionId: string,
+  path: string,
+  recursive: boolean,
+): Promise<void> {
+  return invoke("ssh_delete", { connectionId, path, recursive });
+}
+
+export function chmodSsh(
+  connectionId: string,
+  path: string,
+  mode: number,
+): Promise<void> {
+  return invoke("ssh_chmod", { connectionId, path, mode });
+}
+
 export function disconnectSsh(connectionId: string): Promise<void> {
   return invoke("ssh_disconnect", { connectionId });
 }

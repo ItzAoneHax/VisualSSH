@@ -225,6 +225,14 @@ body {
     background: var(--panel);
   }
 
+  /* 就地重命名/新建输入框（DetailsLayoutPage 的 rename TextBox：
+     不透明实体底 + 强调色 1px 描边，盖在 36px 行内的名称列上） */
+  .rename-input {
+    @apply h-6 min-w-0 flex-1 rounded-[2px] px-1.5 text-sm text-ink outline-none;
+    background: var(--surface-solid);
+    border: 1px solid var(--accent);
+  }
+
   .chip {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium;
   }
