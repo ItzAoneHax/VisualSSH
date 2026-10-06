@@ -2,7 +2,10 @@
 import {
   ArrowLeft,
   ArrowUp,
+  ClipboardCopy,
+  Copy,
   Eye,
+  FolderOpen,
   FolderTree,
   HardDrive,
   House,
@@ -14,12 +17,15 @@ import {
 } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
+import ContextMenu from "@/components/common/ContextMenu.vue";
 import DropdownMenu, { type MenuItem } from "@/components/common/DropdownMenu.vue";
 import ThemeToggle from "@/components/common/ThemeToggle.vue";
 import Breadcrumbs from "@/components/explorer/Breadcrumbs.vue";
 import FileTable from "@/components/explorer/FileTable.vue";
 import { useConnectionsStore } from "@/stores/connections";
 import { useExplorerStore } from "@/stores/explorer";
+import type { FileEntry } from "@/types";
+import { copyText, joinPath } from "@/utils/format";
 
 const emit = defineEmits<{
   disconnect: [];
@@ -37,6 +43,65 @@ const quickLinks = [
 ];
 
 const menuOpen = ref(false);
+
+/** 文件区右键菜单状态 */
+const ctxMenu = ref<{ open: boolean; x: number; y: number; entry: FileEntry | null }>({
+  open: false,
+  x: 0,
+  y: 0,
+  entry: null,
+});
+
+function onFileContextMenu(payload: { entry: FileEntry | null; x: number; y: number }) {
+  ctxMenu.value = { open: true, ...payload };
+}
+
+const ctxMenuItems = computed<MenuItem[]>(() => {
+  const entry = ctxMenu.value.entry;
+  if (!entry) {
+    return [
+      { key: "refresh", label: "刷新", icon: RefreshCw },
+      { key: "sep", label: "", separator: true },
+      {
+        key: "hidden",
+        label: explorer.showHidden ? "隐藏点开头的项目" : "显示点开头的项目",
+        icon: Eye,
+        checked: explorer.showHidden,
+      },
+    ];
+  }
+  const items: MenuItem[] = [];
+  if (entry.kind === "dir") {
+    items.push({ key: "open", label: "打开", icon: FolderOpen });
+    items.push({ key: "sep", label: "", separator: true });
+  }
+  items.push(
+    { key: "copyName", label: "复制名称", icon: Copy },
+    { key: "copyPath", label: "复制路径", icon: ClipboardCopy },
+  );
+  return items;
+});
+
+async function onCtxMenuSelect(key: string) {
+  const entry = ctxMenu.value.entry;
+  ctxMenu.value = { ...ctxMenu.value, open: false };
+  if (!entry) {
+    if (key === "refresh") explorer.refresh();
+    else if (key === "hidden") explorer.showHidden = !explorer.showHidden;
+    return;
+  }
+  switch (key) {
+    case "open":
+      explorer.enter(entry.name);
+      break;
+    case "copyName":
+      await copyText(entry.name);
+      break;
+    case "copyPath":
+      await copyText(joinPath(explorer.cwd, entry.name));
+      break;
+  }
+}
 
 const menuItems = computed<MenuItem[]>(() => [
   { key: "refresh", label: "刷新", icon: RefreshCw },
@@ -199,7 +264,7 @@ function onKeydown(e: KeyboardEvent) {
             重试
           </button>
         </div>
-        <FileTable />
+        <FileTable @context-menu="onFileContextMenu" />
       </div>
 
       <!-- 状态栏 -->
@@ -211,5 +276,15 @@ function onKeydown(e: KeyboardEvent) {
         <span class="font-mono">{{ connections.active.latencyMs }} ms</span>
       </footer>
     </div>
+
+    <!-- 文件区右键菜单（光标定位） -->
+    <ContextMenu
+      :open="ctxMenu.open"
+      :x="ctxMenu.x"
+      :y="ctxMenu.y"
+      :items="ctxMenuItems"
+      @select="onCtxMenuSelect"
+      @close="ctxMenu.open = false"
+    />
   </div>
 </template>
