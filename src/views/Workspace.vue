@@ -1,17 +1,20 @@
 <script setup lang="ts">
 import {
   ArrowLeft,
+  ArrowUp,
   Eye,
-  EyeOff,
   FolderTree,
   HardDrive,
-  Home,
+  House,
   LogOut,
+  MoreHorizontal,
   RefreshCw,
+  ScrollText,
   TriangleAlert,
 } from "@lucide/vue";
-import { onBeforeUnmount, onMounted } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
+import DropdownMenu, { type MenuItem } from "@/components/common/DropdownMenu.vue";
 import ThemeToggle from "@/components/common/ThemeToggle.vue";
 import Breadcrumbs from "@/components/explorer/Breadcrumbs.vue";
 import FileTable from "@/components/explorer/FileTable.vue";
@@ -25,12 +28,42 @@ const emit = defineEmits<{
 const connections = useConnectionsStore();
 const explorer = useExplorerStore();
 
+/** Files 快速跳转（对应侧栏驱动器/常用位置区） */
 const quickLinks = [
-  { label: "根目录 /", path: "/", icon: HardDrive },
-  { label: "/home", path: "/home", icon: Home },
-  { label: "/etc", path: "/etc", icon: FolderTree },
-  { label: "/var", path: "/var", icon: FolderTree },
+  { label: "根目录", path: "/", icon: HardDrive },
+  { label: "主目录", path: "/home", icon: House },
+  { label: "系统配置", path: "/etc", icon: FolderTree },
+  { label: "日志", path: "/var", icon: ScrollText },
 ];
+
+const menuOpen = ref(false);
+
+const menuItems = computed<MenuItem[]>(() => [
+  { key: "refresh", label: "刷新", icon: RefreshCw },
+  {
+    key: "hidden",
+    label: explorer.showHidden ? "隐藏点开头的项目" : "显示点开头的项目",
+    icon: Eye,
+    checked: explorer.showHidden,
+  },
+  { key: "sep", label: "", separator: true },
+  { key: "disconnect", label: "断开连接", icon: LogOut, danger: true },
+]);
+
+function onMenuSelect(key: string) {
+  menuOpen.value = false;
+  switch (key) {
+    case "refresh":
+      explorer.refresh();
+      break;
+    case "hidden":
+      explorer.showHidden = !explorer.showHidden;
+      break;
+    case "disconnect":
+      emit("disconnect");
+      break;
+  }
+}
 
 onMounted(() => {
   if (connections.active) {
@@ -53,120 +86,130 @@ function onKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div v-if="connections.active" class="flex h-full flex-col">
-    <!-- 顶栏 -->
-    <header
-      class="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-panel px-3"
-    >
-      <button
-        type="button"
-        class="btn-icon"
-        title="返回连接管理"
-        aria-label="返回连接管理"
-        @click="emit('disconnect')"
-      >
-        <ArrowLeft :size="16" />
-      </button>
+  <div v-if="connections.active" class="flex h-full">
+    <!-- 侧栏：裸 Mica 层（无边框），32px 导航项 + 3px 强调指示条 -->
+    <aside class="flex w-56 shrink-0 flex-col py-2 pl-1.5">
+      <nav aria-label="导航">
+        <button type="button" class="nav-item" @click="emit('disconnect')">
+          <House :size="16" class="ml-1 shrink-0" />
+          <span class="ml-3 truncate">主页</span>
+        </button>
 
-      <div class="flex min-w-0 items-center gap-2 border-l border-line pl-3">
-        <span class="relative flex h-2 w-2 shrink-0" aria-hidden="true">
-          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-live opacity-60" />
-          <span class="relative inline-flex h-2 w-2 rounded-full bg-live" />
-        </span>
-        <span class="truncate text-sm font-bold">{{ connections.active.alias }}</span>
-        <span class="hidden truncate font-mono text-xs text-faint md:inline">
-          {{ connections.active.profile.username }}@{{ connections.active.profile.host }}
-        </span>
-      </div>
+        <p class="mt-4 mb-1 px-2.5 text-xs font-medium text-faint">此服务器</p>
+        <button
+          v-for="link in quickLinks"
+          :key="link.path"
+          type="button"
+          class="nav-item"
+          :class="explorer.cwd === link.path && 'active'"
+          @click="explorer.open(link.path)"
+        >
+          <component :is="link.icon" :size="16" class="ml-1 shrink-0" />
+          <span class="ml-3 truncate">{{ link.label }}</span>
+        </button>
+      </nav>
 
-      <div class="mx-3 min-w-0 flex-1">
-        <Breadcrumbs />
-      </div>
-
-      <button
-        type="button"
-        class="btn-icon"
-        :title="explorer.showHidden ? '隐藏点开头的文件' : '显示点开头的文件'"
-        :aria-label="explorer.showHidden ? '隐藏点开头的文件' : '显示点开头的文件'"
-        @click="explorer.showHidden = !explorer.showHidden"
-      >
-        <EyeOff v-if="explorer.showHidden" :size="15" />
-        <Eye v-else :size="15" />
-      </button>
-      <button
-        type="button"
-        class="btn-icon"
-        :class="explorer.loading && 'pointer-events-none'"
-        title="刷新（Alt+↑ 返回上一级）"
-        aria-label="刷新当前目录"
-        @click="explorer.refresh()"
-      >
-        <RefreshCw :size="15" :class="explorer.loading && 'animate-spin'" />
-      </button>
-      <ThemeToggle />
-      <button type="button" class="btn-ghost ml-1 h-8 px-2.5 text-xs" @click="emit('disconnect')">
-        <LogOut :size="13" />
-        断开
-      </button>
-    </header>
-
-    <!-- 主体 -->
-    <div class="flex min-h-0 flex-1">
-      <aside class="hidden w-52 shrink-0 flex-col justify-between overflow-y-auto border-r border-line bg-panel/60 p-3 lg:flex">
-        <nav aria-label="快速跳转">
-          <p class="mb-2 px-2 text-[11px] font-bold tracking-[0.12em] text-faint uppercase">快速跳转</p>
-          <button
-            v-for="link in quickLinks"
-            :key="link.path"
-            type="button"
-            class="mb-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left font-mono text-[13px] transition-colors"
-            :class="explorer.cwd === link.path
-              ? 'bg-row-active font-bold text-ink'
-              : 'text-dim hover:bg-row-hover hover:text-ink'"
-            @click="explorer.open(link.path)"
-          >
-            <component :is="link.icon" :size="14" class="shrink-0 text-faint" />
-            {{ link.label }}
-          </button>
-        </nav>
-
-        <div class="rounded-lg border border-dashed border-line px-3 py-2.5 text-[11px] leading-5 text-faint">
-          树状导航、拖拽传输与内置终端将在后续里程碑加入。
+      <!-- 底部连接信息卡 -->
+      <div class="mt-auto px-1.5 pb-1">
+        <div
+          class="rounded-lg p-3"
+          :style="{ background: 'var(--toolbar)', border: '1px solid var(--line)' }"
+        >
+          <p class="flex items-center gap-1.5 text-[13px] font-semibold">
+            <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-live" aria-hidden="true" />
+            <span class="truncate">{{ connections.active.alias }}</span>
+          </p>
+          <p class="mt-1 truncate font-mono text-[11px] text-dim">
+            {{ connections.active.profile.username }}@{{ connections.active.profile.host }}
+          </p>
         </div>
-      </aside>
+      </div>
+    </aside>
 
-      <main class="flex min-w-0 flex-1 flex-col gap-3 overflow-hidden p-4">
+    <!-- 主列：工具栏卡 + 文件区卡 + 状态栏（Files 双卡结构，间距 4） -->
+    <div class="flex min-w-0 flex-1 flex-col gap-1 p-2 pl-2.5">
+      <!-- 工具栏：OverlayCornerRadius 8、内边距 4、按钮间距 4 -->
+      <div
+        class="flex h-12 shrink-0 items-center gap-1 rounded-lg px-1"
+        :style="{ background: 'var(--toolbar)', border: '1px solid var(--line)' }"
+      >
+        <button
+          type="button"
+          class="btn-icon"
+          title="返回主页"
+          aria-label="返回主页"
+          @click="emit('disconnect')"
+        >
+          <ArrowLeft :size="16" />
+        </button>
+        <button
+          type="button"
+          class="btn-icon"
+          :disabled="explorer.cwd === '/' || explorer.loading"
+          title="上一级（Alt+↑）"
+          aria-label="上一级"
+          @click="explorer.up()"
+        >
+          <ArrowUp :size="16" />
+        </button>
+        <button
+          type="button"
+          class="btn-icon"
+          title="刷新"
+          aria-label="刷新"
+          @click="explorer.refresh()"
+        >
+          <RefreshCw :size="15" :class="explorer.loading && 'animate-spin'" />
+        </button>
+
+        <div class="mx-1.5 min-w-0 flex-1">
+          <Breadcrumbs />
+        </div>
+
+        <ThemeToggle />
+        <div class="relative">
+          <button
+            type="button"
+            class="btn-icon"
+            title="更多选项"
+            aria-label="更多选项"
+            @click="menuOpen = !menuOpen"
+          >
+            <MoreHorizontal :size="16" />
+          </button>
+          <DropdownMenu :open="menuOpen" :items="menuItems" @select="onMenuSelect" @close="menuOpen = false" />
+        </div>
+      </div>
+
+      <!-- 文件区：FileArea 卡（8 圆角 + 1px 描边） -->
+      <div
+        class="min-h-0 flex-1 overflow-y-auto rounded-lg"
+        :style="{ background: 'var(--panel)', border: '1px solid var(--line)' }"
+      >
         <div
           v-if="explorer.error"
-          class="flex items-center gap-2.5 rounded-lg border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-sm text-danger"
+          class="m-2 flex items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-sm"
+          :style="{ background: 'color-mix(in srgb, var(--danger) 10%, transparent)', color: 'var(--danger)' }"
         >
           <TriangleAlert :size="15" class="shrink-0" />
-          <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="explorer.error">
+          <span class="min-w-0 flex-1 truncate text-xs" :title="explorer.error">
             {{ explorer.error }}
           </span>
-          <button type="button" class="btn-ghost h-7 px-2 text-xs" @click="explorer.refresh()">
-            <RefreshCw :size="12" />
+          <button type="button" class="btn-secondary h-7 px-2 text-xs" @click="explorer.refresh()">
             重试
           </button>
         </div>
+        <FileTable />
+      </div>
 
-        <div class="min-h-0 flex-1 overflow-y-auto">
-          <FileTable />
-        </div>
-      </main>
+      <!-- 状态栏 -->
+      <footer class="flex h-8 shrink-0 items-center justify-between px-3 text-xs text-dim">
+        <span>
+          {{ explorer.visibleEntries.length }} 个项目
+          <span v-if="explorer.selectedName">· 已选择 1 项</span>
+        </span>
+        <span class="font-mono">{{ connections.active.latencyMs }} ms</span>
+      </footer>
     </div>
-
-    <!-- 状态栏：路径即提示符 -->
-    <footer
-      class="flex h-8 shrink-0 items-center justify-between border-t border-line bg-panel px-4 font-mono text-[11px] text-dim"
-    >
-      <span class="flex min-w-0 items-center">
-        <span class="truncate">{{ explorer.cwd }}</span>
-        <span class="cursor-blink ml-1 inline-block h-3.5 w-[7px] bg-accent/80" aria-hidden="true" />
-      </span>
-      <span class="ml-4 shrink-0">
-        {{ explorer.visibleEntries.length }} 项 · {{ connections.active.latencyMs }} ms
-      </span>
-    </footer>
   </div>
 </template>

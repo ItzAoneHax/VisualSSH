@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronRight, HardDrive } from "@lucide/vue";
 import { computed } from "vue";
 
 import { useExplorerStore } from "@/stores/explorer";
@@ -10,7 +11,6 @@ const explorer = useExplorerStore();
 const crumbs = computed(() => {
   const parts = explorer.breadcrumbSegments;
   return [
-    { name: "/", path: "/" },
     ...parts.map((name, i) => ({
       name,
       path: joinPath("/", parts.slice(0, i + 1).join("/")),
@@ -19,23 +19,37 @@ const crumbs = computed(() => {
 });
 
 function pathOf(index: number) {
-  return crumbs.value[index].path;
+  return index < 0 ? "/" : crumbs.value[index].path;
 }
 </script>
 
 <template>
+  <!-- BreadcrumbBar：34 高，Layer 填充 + 1px 描边，圆角 4 -->
   <nav
-    class="flex min-w-0 items-center gap-1 overflow-x-auto font-mono text-[13px] whitespace-nowrap"
+    class="flex h-[34px] min-w-0 items-center overflow-hidden rounded-[4px]"
+    :style="{ background: 'var(--sidebar)', border: '1px solid var(--line)' }"
     aria-label="路径导航"
   >
+    <!-- 根项：左侧全圆（BreadcrumbBar 根项 radius 16,2,2,16） -->
+    <button
+      type="button"
+      class="flex h-8 shrink-0 items-center gap-1.5 rounded-l-[16px] rounded-r-[2px] pr-2 pl-3 text-sm transition-colors"
+      :class="explorer.cwd === '/' ? 'font-semibold text-ink' : 'text-dim hover:bg-fill-subtle hover:text-ink'"
+      title="/"
+      @click="explorer.open('/')"
+    >
+      <HardDrive :size="14" class="shrink-0" />
+      <span v-if="explorer.cwd === '/'">此电脑</span>
+    </button>
+
     <template v-for="(crumb, i) in crumbs" :key="crumb.path">
-      <span v-if="i > 0" class="px-0.5 text-[11px] text-faint select-none" aria-hidden="true">❯</span>
+      <ChevronRight :size="13" class="mx-0.5 shrink-0 text-faint" aria-hidden="true" />
       <button
         type="button"
-        class="rounded px-1.5 py-0.5 transition-colors"
+        class="h-8 shrink-0 rounded-[2px] px-2 text-sm whitespace-nowrap transition-colors"
         :class="i === crumbs.length - 1
-          ? 'font-bold text-ink'
-          : 'text-dim hover:text-accent'"
+          ? 'font-semibold text-ink'
+          : 'text-dim hover:bg-fill-subtle hover:text-ink'"
         :title="crumb.path"
         @click="i < crumbs.length - 1 && explorer.open(pathOf(i))"
       >
