@@ -53,7 +53,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             v-else
             type="button"
             role="menuitem"
-            class="flex h-8 w-full items-center gap-2.5 rounded-[4px] px-2.5 text-left text-sm transition-colors"
+            class="flex h-8 w-full items-center gap-2.5 px-2.5 text-left text-sm transition-colors"
             :class="item.disabled ? 'cursor-not-allowed opacity-40' : 'hover:bg-fill-subtle'"
             :style="{ color: item.danger ? 'var(--danger)' : 'var(--ink)' }"
             :disabled="item.disabled"
