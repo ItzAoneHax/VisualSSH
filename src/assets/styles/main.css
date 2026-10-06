@@ -233,6 +233,28 @@ body {
     border: 1px solid var(--accent);
   }
 
+  /* 不定进度条（WinUI ProgressBar IsIndeterminate：accent 段循环平移，排队中用） */
+  .progress-indeterminate {
+    position: relative;
+    overflow: hidden;
+  }
+  .progress-indeterminate::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -40%;
+    width: 40%;
+    border-radius: inherit;
+    background: var(--accent);
+    animation: progress-indeterminate-slide 1.6s infinite ease-in-out;
+  }
+  @keyframes progress-indeterminate-slide {
+    to {
+      left: 100%;
+    }
+  }
+
   .chip {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium;
   }
@@ -288,11 +310,40 @@ body {
   transform: translateY(-4px);
 }
 
+/* 传输中心卡片重排（Files RepositionThemeTransition 的近似） */
+.card-list-move {
+  transition: transform 0.2s ease;
+}
+.card-list-enter-active {
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+}
+.card-list-enter-from {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+.card-list-leave-active {
+  transition: opacity 0.1s ease;
+}
+.card-list-leave-to {
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .view-enter-active,
   .view-leave-active,
   .popup-enter-active,
-  .popup-leave-active {
+  .popup-leave-active,
+  .card-list-move,
+  .card-list-enter-active,
+  .card-list-leave-active {
     transition: none;
+  }
+  .progress-indeterminate::before {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.6;
   }
 }

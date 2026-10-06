@@ -364,6 +364,7 @@ function onKeydown(e: KeyboardEvent) {
           <Breadcrumbs />
         </div>
 
+        <TransferCenter />
         <ThemeToggle />
         <div class="relative">
           <button
@@ -427,16 +428,13 @@ function onKeydown(e: KeyboardEvent) {
         </div>
       </div>
 
-      <!-- 状态栏 -->
+      <!-- 状态栏（Files StatusBar：无传输元素，仅目录统计） -->
       <footer class="flex h-8 shrink-0 items-center justify-between px-3 text-xs text-dim">
         <span>
           {{ explorer.visibleEntries.length }} 个项目
           <span v-if="explorer.selectedName">· 已选择 1 项</span>
         </span>
-        <span class="flex items-center gap-1">
-          <TransferCenter />
-          <span class="font-mono">{{ connections.active.latencyMs }} ms</span>
-        </span>
+        <span class="font-mono">{{ connections.active.latencyMs }} ms</span>
       </footer>
     </div>
 

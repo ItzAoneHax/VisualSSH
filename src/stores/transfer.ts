@@ -13,7 +13,7 @@ import { joinPath } from "@/utils/format";
 export type TransferStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 export type TransferDirection = "upload" | "download";
 
-/** 面板行 */
+/** 面板行（speedHistory 为速度折线采样，最新在末尾） */
 export interface TransferRow {
   id: string;
   direction: TransferDirection;
@@ -23,7 +23,11 @@ export interface TransferRow {
   speedBps: number;
   status: TransferStatus;
   error?: string;
+  speedHistory: number[];
 }
+
+/** 速度折线最大采样数（Files SpeedGraph 同款滑动窗口思路） */
+const SPEED_SAMPLES = 48;
 
 /** transfer://progress 事件负载（与后端 TransferInfo 的 camelCase 序列化对应） */
 interface TransferPayload {
@@ -78,6 +82,10 @@ export const useTransferStore = defineStore("transfer", () => {
       row.speedBps = p.speedBps;
       row.status = p.status;
       row.error = p.error;
+      if (p.status === "running" && p.speedBps > 0) {
+        row.speedHistory.push(p.speedBps);
+        if (row.speedHistory.length > SPEED_SAMPLES) row.speedHistory.shift();
+      }
     } else {
       rows.value.unshift({
         id: p.transferId,
@@ -88,6 +96,7 @@ export const useTransferStore = defineStore("transfer", () => {
         speedBps: p.speedBps,
         status: p.status,
         error: p.error,
+        speedHistory: [],
       });
     }
   }
@@ -111,6 +120,7 @@ export const useTransferStore = defineStore("transfer", () => {
       total: 0,
       speedBps: 0,
       status: "queued",
+      speedHistory: [],
     });
     try {
       await uploadTransfer(id, connectionId, localPath, joinPath(remoteDir, fileName));
@@ -143,6 +153,7 @@ export const useTransferStore = defineStore("transfer", () => {
       total: 0,
       speedBps: 0,
       status: "queued",
+      speedHistory: [],
     });
     try {
       await downloadTransfer(id, connectionId, remotePath, localPath);
@@ -180,6 +191,20 @@ export const useTransferStore = defineStore("transfer", () => {
     }
   }
 
+  /** 面板头部「清除已完成」（Files StatusCenter 同款）：清掉全部终态行 */
+  async function clearFinished() {
+    const finished = rows.value
+      .filter((r) => !isActiveStatus(r.status))
+      .map((r) => r.id);
+    for (const id of finished) {
+      await removeRow(id);
+    }
+  }
+
+  function isActiveStatus(status: TransferStatus): boolean {
+    return status === "queued" || status === "running";
+  }
+
   return {
     rows,
     activeCount,
@@ -190,5 +215,6 @@ export const useTransferStore = defineStore("transfer", () => {
     startDownload,
     cancel,
     removeRow,
+    clearFinished,
   };
 });
