@@ -348,6 +348,26 @@ body {
   opacity: 0;
 }
 
+/* 悬浮编辑窗：遮罩淡入 + 窗体自底部升起（Win11 浮层动效） */
+.editor-pop-enter-active {
+  transition: opacity 0.18s ease;
+}
+.editor-pop-enter-active > div {
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.editor-pop-enter-from {
+  opacity: 0;
+}
+.editor-pop-enter-from > div {
+  transform: translateY(28px);
+}
+.editor-pop-leave-active {
+  transition: opacity 0.12s ease;
+}
+.editor-pop-leave-to {
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .view-enter-active,
   .view-leave-active,

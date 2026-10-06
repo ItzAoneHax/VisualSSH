@@ -19,15 +19,19 @@ import Modal from "@/components/common/Modal.vue";
 import { useEditorStore } from "@/stores/editor";
 
 /**
- * 底部编辑抽屉：默认高 40%，顶边可拖拽调高（15%–85%），
- * 可最大化（占满除状态栏外的主列）、可关闭；默认只读，「编辑」切换可写。
+ * 悬浮编辑窗：覆盖全页的模糊遮罩（Acrylic 层）+ 居中亚克力窗体
+ * （半透明 surface + backdrop blur + 12 圆角 + 深影），从底部升起进场。
+ * 右下角可拖拽调整大小，可最大化/还原；默认只读，「编辑」切换可写。
  * CodeMirror 6：行号 + 当前行高亮 + JetBrains Mono，语言包按扩展名懒加载。
  */
 
 const editor = useEditorStore();
 
-/** 抽屉高度（flex-basis）；拖拽期间关闭过渡 */
-const basis = ref("40%");
+/** 窗体尺寸（px）；拖拽期间关闭过渡 */
+const size = ref({
+  w: Math.min(1080, Math.round(window.innerWidth * 0.86)),
+  h: Math.min(720, Math.round(window.innerHeight * 0.76)),
+});
 const dragging = ref(false);
 const confirmClose = ref(false);
 
@@ -212,17 +216,22 @@ watch(
   },
 );
 
-/** 顶边拖拽调高：按主列高度换算百分比，15%–85% */
-function onHandleDown(e: PointerEvent) {
+/** 右下角拖拽调整窗体大小（宽 480–92vw / 高 280–90vh） */
+function onResizeDown(e: PointerEvent) {
   if (editor.maximized) return;
-  const pane = (e.currentTarget as HTMLElement).closest("[data-main-col]") as HTMLElement | null;
-  if (!pane) return;
   dragging.value = true;
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  const paneRect = pane.getBoundingClientRect();
+  const startX = e.clientX;
+  const startY = e.clientY;
+  const startW = size.value.w;
+  const startH = size.value.h;
   const onMove = (ev: PointerEvent) => {
-    const pct = ((paneRect.bottom - ev.clientY) / paneRect.height) * 100;
-    basis.value = `${Math.min(85, Math.max(15, pct)).toFixed(1)}%`;
+    const maxW = Math.round(window.innerWidth * 0.92);
+    const maxH = Math.round(window.innerHeight * 0.9);
+    size.value = {
+      w: Math.min(maxW, Math.max(480, startW + ev.clientX - startX)),
+      h: Math.min(maxH, Math.max(280, startH + ev.clientY - startY)),
+    };
   };
   const onUp = () => {
     dragging.value = false;
@@ -249,28 +258,41 @@ function discardAndClose() {
 </script>
 
 <template>
-  <!-- 底部滑出抽屉（主列 flex 成员，压占文件区高度） -->
-  <div
-    v-if="editor.open"
-    class="flex shrink-0 flex-col overflow-hidden rounded-lg"
-    :style="{
-      flexBasis: editor.maximized ? 'calc(100% - 2rem)' : basis,
-      transition: dragging ? 'none' : 'flex-basis 0.2s ease',
-      background: 'var(--toolbar)',
-      border: '1px solid var(--line)',
-    }"
-    role="complementary"
-    aria-label="文件编辑器"
-  >
-    <!-- 顶边拖拽把手 -->
-    <div
-      class="h-1.5 shrink-0 cursor-row-resize"
-      @pointerdown="onHandleDown"
-      @dblclick="editor.toggleMaximized()"
-    />
-
-    <!-- 标题栏：●脏标记 + 文件名 + 路径 + 动作 -->
-    <header class="flex h-9 shrink-0 items-center gap-2 px-2.5">
+  <Teleport to="body">
+    <!-- 全页模糊遮罩 + 悬浮亚克力编辑窗（从底部升起） -->
+    <Transition name="editor-pop" appear>
+      <div
+        v-if="editor.open"
+        class="fixed inset-0 z-40 flex items-center justify-center p-6"
+        :style="{
+          background: 'color-mix(in srgb, var(--bg) 30%, rgba(0, 0, 0, 0.32))',
+          backdropFilter: 'blur(6px)',
+        }"
+        @click.self="requestClose"
+      >
+        <div
+          class="flex min-w-0 flex-col overflow-hidden"
+          :style="{
+            width: editor.maximized ? 'auto' : `${size.w}px`,
+            height: editor.maximized ? 'auto' : `${size.h}px`,
+            inset: editor.maximized ? '20px' : undefined,
+            position: editor.maximized ? 'absolute' : undefined,
+            transition: dragging ? 'none' : 'width 0.15s ease, height 0.15s ease',
+            background: 'color-mix(in srgb, var(--surface-solid) 84%, transparent)',
+            backdropFilter: 'blur(20px) saturate(1.15)',
+            border: '1px solid var(--stroke-flyout)',
+            borderRadius: '12px',
+            boxShadow: '0 32px 64px rgba(0, 0, 0, 0.36)',
+          }"
+          role="dialog"
+          aria-modal="true"
+          aria-label="文件编辑器"
+        >
+          <!-- 标题栏：●脏标记 + 文件名 + 路径 + 动作（双击空白=最大化切换） -->
+          <header
+            class="flex h-10 shrink-0 items-center gap-2 px-3"
+            @dblclick.self="editor.toggleMaximized()"
+          >
       <span class="min-w-0 flex-1">
         <span class="truncate text-[13px] font-semibold" :title="editor.path">
           <span v-if="editor.dirty" class="text-accent">● </span>{{ editor.fileName }}
@@ -365,28 +387,39 @@ function discardAndClose() {
 
       <!-- CodeMirror 挂载点 -->
       <div v-show="!editor.loading && !editor.unsupported" ref="host" class="h-full" />
-    </div>
-  </div>
 
-  <!-- 关闭前确认（有未保存更改） -->
-  <Modal
-    :open="confirmClose"
-    title="未保存的更改"
-    @close="confirmClose = false"
-  >
-    <div class="flex flex-col gap-4">
-      <p class="text-sm leading-6">
-        「<span class="font-semibold">{{ editor.fileName }}</span
-        >」已修改但尚未保存，关闭将丢弃这些更改。
-      </p>
-      <footer class="flex justify-end gap-2">
-        <button type="button" class="btn-secondary" @click="confirmClose = false">
-          继续编辑
-        </button>
-        <button type="button" class="btn-danger" @click="discardAndClose">
-          放弃更改并关闭
-        </button>
-      </footer>
+      <!-- 右下角拖拽调整大小 -->
+      <div
+        v-if="!editor.maximized && !editor.unsupported"
+        class="absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize"
+        title="拖拽调整大小"
+        @pointerdown="onResizeDown"
+      />
     </div>
-  </Modal>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- 关闭前确认（有未保存更改） -->
+    <Modal
+      :open="confirmClose"
+      title="未保存的更改"
+      @close="confirmClose = false"
+    >
+      <div class="flex flex-col gap-4">
+        <p class="text-sm leading-6">
+          「<span class="font-semibold">{{ editor.fileName }}</span
+          >」已修改但尚未保存，关闭将丢弃这些更改。
+        </p>
+        <footer class="flex justify-end gap-2">
+          <button type="button" class="btn-secondary" @click="confirmClose = false">
+            继续编辑
+          </button>
+          <button type="button" class="btn-danger" @click="discardAndClose">
+            放弃更改并关闭
+          </button>
+        </footer>
+      </div>
+    </Modal>
+  </Teleport>
 </template>
