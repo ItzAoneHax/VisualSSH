@@ -8,15 +8,21 @@ import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useTerminalStore } from "@/stores/terminal";
 
 /**
- * 底部终端面板：默认高 35%、顶边拖拽调高（15%–85%）、可最大化/还原、可关闭。
- * xterm.js 双向转发：onData → ssh_terminal_write；terminal://data → xterm.write。
- * fit addon 自适应面板尺寸，变化时同步 ssh_terminal_resize；主题跟随明暗。
+ * 悬浮终端窗（与编辑器同款形态）：全页模糊遮罩（避开标题栏）+ 居中亚克力窗体，
+ * 自底部升起。终端习惯宽扁比例，默认 86vw × 64vh，右下角可拖拽调整大小。
+ * xterm.js 双向转发：onData → ssh_terminal_write；terminal://data → xterm.write；
+ * fit addon 自适应窗体尺寸，变化时同步 ssh_terminal_resize；主题跟随明暗。
  */
 
 const terminalStore = useTerminalStore();
 
-const basis = ref("35%");
+/** 窗体尺寸（px）；拖拽期间关闭过渡 */
+const size = ref({
+  w: Math.min(1024, Math.round(window.innerWidth * 0.86)),
+  h: Math.min(520, Math.round(window.innerHeight * 0.64)),
+});
 const dragging = ref(false);
+const maximized = ref(false);
 const host = ref<HTMLElement | null>(null);
 
 /** Windows Terminal Campbell 暗色（#0C0C0C 底） */
@@ -102,7 +108,7 @@ async function mountXterm() {
   xterm.onData((data) => terminalStore.write(encoder.encode(data)));
   xterm.focus();
 
-  // 面板尺寸变化（拖拽/最大化/窗口缩放）→ fit + 同步后端
+  // 窗体尺寸变化（拖拽/最大化/窗口缩放）→ fit + 同步后端
   resizeObserver = new ResizeObserver(() => {
     try {
       fitAddon?.fit();
@@ -126,7 +132,7 @@ async function mountXterm() {
     (bytes) => xterm?.write(bytes),
     (status) => {
       xterm?.write(
-        `\r\n\x1b[90m[进程已退出${status == null ? "" : `，退出码 ${status}`}] — 可关闭此面板\x1b[0m\r\n`,
+        `\r\n\x1b[90m[进程已退出${status == null ? "" : `，退出码 ${status}`}] — 可关闭此窗口\x1b[0m\r\n`,
       );
     },
   );
@@ -155,31 +161,39 @@ function destroyXterm() {
 
 onBeforeUnmount(destroyXterm);
 
-// 面板打开 → 等 terminalId → 挂载 xterm；关闭/退出 → 销毁
+// 窗口关闭 → 销毁 xterm；terminalId 就绪 → 挂载
 watch(
   () => terminalStore.open,
   (open) => {
     if (!open) destroyXterm();
   },
 );
+// terminalId 就绪 → 挂载 xterm。immediate 兜底：openIn 的 invoke 若快于面板
+// 挂载完成，普通 watch 会错过赋值瞬间（mock 即时 resolve 时必现）
 watch(
   () => terminalStore.terminalId,
   (id) => {
     if (id) void mountXterm();
   },
+  { immediate: true },
 );
 
-/** 顶边拖拽调高：按主列高度换算 15%–85% */
-function onHandleDown(e: PointerEvent) {
-  if (terminalStore.open === false) return;
-  const pane = (e.currentTarget as HTMLElement).closest("[data-main-col]") as HTMLElement | null;
-  if (!pane) return;
+/** 右下角拖拽调整窗体大小（宽 480–92vw / 高 240–90vh） */
+function onResizeDown(e: PointerEvent) {
+  if (maximized.value) return;
   dragging.value = true;
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  const paneRect = pane.getBoundingClientRect();
+  const startX = e.clientX;
+  const startY = e.clientY;
+  const startW = size.value.w;
+  const startH = size.value.h;
   const onMove = (ev: PointerEvent) => {
-    const pct = ((paneRect.bottom - ev.clientY) / paneRect.height) * 100;
-    basis.value = `${Math.min(85, Math.max(15, pct)).toFixed(1)}%`;
+    const maxW = Math.round(window.innerWidth * 0.92);
+    const maxH = Math.round(window.innerHeight * 0.9);
+    size.value = {
+      w: Math.min(maxW, Math.max(480, startW + ev.clientX - startX)),
+      h: Math.min(maxH, Math.max(240, startH + ev.clientY - startY)),
+    };
   };
   const onUp = () => {
     dragging.value = false;
@@ -193,62 +207,90 @@ function onHandleDown(e: PointerEvent) {
 function toggleMaximized() {
   maximized.value = !maximized.value;
 }
-
-const maximized = ref(false);
 </script>
 
 <template>
-  <!-- 底部滑出终端面板（主列 flex 成员） -->
-  <div
-    v-if="terminalStore.open"
-    class="flex shrink-0 flex-col overflow-hidden rounded-lg"
-    :style="{
-      flexBasis: maximized ? 'calc(100% - 2rem)' : basis,
-      transition: dragging ? 'none' : 'flex-basis 0.2s ease',
-      background: 'var(--toolbar)',
-      border: '1px solid var(--line)',
-    }"
-    role="complementary"
-    aria-label="终端"
-  >
-    <!-- 顶边拖拽把手 -->
-    <div class="h-1.5 shrink-0 cursor-row-resize" @pointerdown="onHandleDown" @dblclick="toggleMaximized" />
-
-    <!-- 标题栏 -->
-    <header class="flex h-9 shrink-0 items-center gap-2 px-2.5">
-      <SquareTerminal :size="15" class="shrink-0" :class="terminalStore.exited ? 'text-faint' : 'text-accent'" />
-      <span class="text-[13px] font-semibold">终端</span>
-      <span v-if="terminalStore.exited" class="text-xs text-faint">已结束</span>
-      <span v-if="terminalStore.error" class="min-w-0 flex-1 truncate text-xs text-danger" :title="terminalStore.error">
-        {{ terminalStore.error }}
-      </span>
-      <span class="min-w-0 flex-1" />
-      <button
-        type="button"
-        class="btn-icon h-7 w-7"
-        :title="maximized ? '还原' : '最大化'"
-        :aria-label="maximized ? '还原终端面板' : '最大化终端面板'"
-        @click="toggleMaximized"
+  <Teleport to="body">
+    <!-- 全页模糊遮罩（避开标题栏）+ 悬浮终端窗 -->
+    <Transition name="editor-pop" appear>
+      <div
+        v-if="terminalStore.open"
+        class="fixed inset-0 top-9 z-40 flex items-center justify-center p-6"
+        :style="{
+          background: 'color-mix(in srgb, var(--bg) 30%, rgba(0, 0, 0, 0.32))',
+          backdropFilter: 'blur(6px)',
+        }"
+        @click.self="terminalStore.close()"
       >
-        <ChevronsDownUp v-if="maximized" :size="14" />
-        <ChevronsUpDown v-else :size="14" />
-      </button>
-      <button
-        type="button"
-        class="btn-icon h-7 w-7"
-        title="关闭终端"
-        aria-label="关闭终端面板"
-        @click="terminalStore.close()"
-      >
-        <X :size="15" />
-      </button>
-    </header>
+        <div
+          class="flex min-w-0 flex-col overflow-hidden"
+          :style="{
+            width: maximized ? 'auto' : `${size.w}px`,
+            height: maximized ? 'auto' : `${size.h}px`,
+            inset: maximized ? '20px' : undefined,
+            position: maximized ? 'absolute' : undefined,
+            transition: dragging ? 'none' : 'width 0.15s ease, height 0.15s ease',
+            background: 'color-mix(in srgb, var(--surface-solid) 84%, transparent)',
+            backdropFilter: 'blur(20px) saturate(1.15)',
+            border: '1px solid var(--stroke-flyout)',
+            borderRadius: '12px',
+            boxShadow: '0 32px 64px rgba(0, 0, 0, 0.36)',
+          }"
+          role="dialog"
+          aria-modal="true"
+          aria-label="终端"
+        >
+          <!-- 标题栏（双击空白=最大化切换） -->
+          <header
+            class="flex h-10 shrink-0 items-center gap-2 px-3"
+            @dblclick.self="toggleMaximized"
+          >
+            <SquareTerminal :size="15" class="shrink-0" :class="terminalStore.exited ? 'text-faint' : 'text-accent'" />
+            <span class="text-[13px] font-semibold">终端</span>
+            <span v-if="terminalStore.exited" class="text-xs text-faint">已结束</span>
+            <span v-if="terminalStore.error" class="min-w-0 flex-1 truncate text-xs text-danger" :title="terminalStore.error">
+              {{ terminalStore.error }}
+            </span>
+            <span class="min-w-0 flex-1" />
+            <button
+              type="button"
+              class="btn-icon h-7 w-7"
+              :title="maximized ? '还原' : '最大化'"
+              :aria-label="maximized ? '还原终端窗口' : '最大化终端窗口'"
+              @click="toggleMaximized"
+            >
+              <ChevronsDownUp v-if="maximized" :size="14" />
+              <ChevronsUpDown v-else :size="14" />
+            </button>
+            <button
+              type="button"
+              class="btn-icon h-7 w-7"
+              title="关闭终端"
+              aria-label="关闭终端窗口"
+              @click="terminalStore.close()"
+            >
+              <X :size="15" />
+            </button>
+          </header>
 
-    <!-- xterm 挂载点（终端本体走自身黑/白底，不套卡片样式） -->
-    <div
-      ref="host"
-      class="min-h-0 flex-1 overflow-hidden rounded-md px-1.5 pb-1"
-      :style="{ background: currentTheme().background }"
-    />
-  </div>
+          <!-- xterm 挂载点（终端本体走自身黑/白底） -->
+          <div class="relative min-h-0 flex-1">
+            <div
+              ref="host"
+              class="absolute inset-0 overflow-hidden rounded-md px-1.5 pb-1"
+              :style="{ background: currentTheme().background }"
+            />
+
+            <!-- 右下角拖拽调整大小 -->
+            <div
+              v-if="!maximized"
+              class="absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize"
+              title="拖拽调整大小"
+              @pointerdown="onResizeDown"
+            />
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
