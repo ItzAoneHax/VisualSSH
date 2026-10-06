@@ -52,6 +52,23 @@ export function kindLabel(kind: FileEntry["kind"]): string {
   }
 }
 
+/** 传输速度：复用 formatSize */
+export function formatSpeed(bps: number): string {
+  return `${formatSize(bps)}/s`;
+}
+
+/** 剩余时间 mm:ss / h:mm:ss；速度未知返回 — */
+export function formatEta(remainingBytes: number, speedBps: number): string {
+  if (speedBps <= 0 || remainingBytes <= 0) return "—";
+  const secs = Math.ceil(remainingBytes / speedBps);
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+}
+
 /** 复制到剪贴板：clipboard API 失败时回退 execCommand（WebView2 兼容） */
 export async function copyText(text: string): Promise<boolean> {
   try {

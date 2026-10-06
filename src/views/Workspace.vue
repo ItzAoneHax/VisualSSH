@@ -30,6 +30,7 @@ import ThemeToggle from "@/components/common/ThemeToggle.vue";
 import Breadcrumbs from "@/components/explorer/Breadcrumbs.vue";
 import ChmodDialog from "@/components/explorer/ChmodDialog.vue";
 import FileTable from "@/components/explorer/FileTable.vue";
+import TransferCenter from "@/components/workspace/TransferCenter.vue";
 import { useConnectionsStore } from "@/stores/connections";
 import { useExplorerStore } from "@/stores/explorer";
 import type { FileEntry } from "@/types";
@@ -352,7 +353,10 @@ function onKeydown(e: KeyboardEvent) {
           {{ explorer.visibleEntries.length }} 个项目
           <span v-if="explorer.selectedName">· 已选择 1 项</span>
         </span>
-        <span class="font-mono">{{ connections.active.latencyMs }} ms</span>
+        <span class="flex items-center gap-1">
+          <TransferCenter />
+          <span class="font-mono">{{ connections.active.latencyMs }} ms</span>
+        </span>
       </footer>
     </div>
 
