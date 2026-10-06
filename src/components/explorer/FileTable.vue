@@ -17,7 +17,8 @@ const columns: { key: SortKey; label: string; class: string }[] = [
   { key: "mtime", label: "修改时间", class: "w-40" },
   { key: "kind", label: "类型", class: "w-24" },
   { key: "size", label: "大小", class: "w-24 text-right" },
-  { key: "permissions", label: "权限", class: "w-28 pl-2.5 font-mono" },
+  // 等宽字体只加在数据单元格上：表头是中文，等宽栈会回退成宋体
+  { key: "permissions", label: "权限", class: "w-28 pl-2.5" },
 ];
 
 function iconFor(entry: FileEntry) {
