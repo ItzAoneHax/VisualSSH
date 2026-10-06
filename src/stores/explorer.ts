@@ -9,6 +9,16 @@ import { joinPath, parentPath } from "@/utils/format";
  * 远程文件浏览器状态。
  * 连接建立后由 Workspace 视图调用 open(rootPath) 完成首次加载。
  */
+export type SortKey = "name" | "mtime" | "kind" | "size" | "permissions";
+
+export const SORT_KEYS: SortKey[] = [
+  "name",
+  "mtime",
+  "kind",
+  "size",
+  "permissions",
+];
+
 export const useExplorerStore = defineStore("explorer", () => {
   const connectionId = ref("");
   const cwd = ref("/");
@@ -16,8 +26,10 @@ export const useExplorerStore = defineStore("explorer", () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
   const showHidden = ref(false);
-  /** 返回上一级的历史栈（Phase 1 仅支持向上） */
   const selectedName = ref<string | null>(null);
+  /** 详情视图列排序（Files：点击列头切换，同列翻转方向） */
+  const sortKey = ref<SortKey>("name");
+  const sortAsc = ref(true);
 
   async function open(path: string) {
     if (!connectionId.value || loading.value) return;
@@ -63,11 +75,36 @@ export const useExplorerStore = defineStore("explorer", () => {
     error.value = null;
   }
 
-  const visibleEntries = computed(() =>
-    showHidden.value
-      ? entries.value
-      : entries.value.filter((e) => !e.name.startsWith(".")),
-  );
+  const visibleEntries = computed(() => {
+    const key = sortKey.value;
+    const asc = sortAsc.value ? 1 : -1;
+    const dirFirst = (a: FileEntry, b: FileEntry) =>
+      (a.kind === "dir" ? 0 : 1) - (b.kind === "dir" ? 0 : 1);
+
+    const compare: Record<SortKey, (a: FileEntry, b: FileEntry) => number> = {
+      name: (a, b) =>
+        a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }),
+      mtime: (a, b) => (a.mtime ?? 0) - (b.mtime ?? 0),
+      kind: (a, b) => a.kind.localeCompare(b.kind),
+      size: (a, b) => a.size - b.size,
+      permissions: (a, b) => a.permissions.localeCompare(b.permissions),
+    };
+
+    return entries.value
+      .filter((e) => showHidden.value || !e.name.startsWith("."))
+      .slice()
+      .sort((a, b) => dirFirst(a, b) || asc * compare[key](a, b));
+  });
+
+  function sortBy(key: SortKey) {
+    if (sortKey.value === key) {
+      sortAsc.value = !sortAsc.value;
+    } else {
+      sortKey.value = key;
+      // 修改时间默认最新在前，其余列默认升序
+      sortAsc.value = key !== "mtime";
+    }
+  }
 
   /** 面包屑分段："/" → []，"/var/log" → ["var", "log"] */
   const breadcrumbSegments = computed(() =>
@@ -86,6 +123,8 @@ export const useExplorerStore = defineStore("explorer", () => {
     error,
     showHidden,
     selectedName,
+    sortKey,
+    sortAsc,
     visibleEntries,
     breadcrumbSegments,
     open,
@@ -95,5 +134,6 @@ export const useExplorerStore = defineStore("explorer", () => {
     reset,
     clear,
     select,
+    sortBy,
   };
 });
