@@ -18,6 +18,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 
 import Modal from "@/components/common/Modal.vue";
 import { useEditorStore } from "@/stores/editor";
+import { useSettingsStore } from "@/stores/settings";
 
 /**
  * 悬浮编辑窗：覆盖全页的模糊遮罩（Acrylic 层）+ 居中亚克力窗体
@@ -51,12 +52,16 @@ const cmHighlight = HighlightStyle.define([
   { tag: t.typeName, color: "var(--cm-type)" },
 ]);
 
+/** 字号走 compartment（设置页变更即时生效） */
+const fontSizeComp = new Compartment();
+const fontSizeTheme = (px: number) =>
+  EditorView.theme({ "&": { fontSize: `${px}px` } });
+
 const cmTheme = EditorView.theme({
   "&": {
     height: "100%",
     backgroundColor: "transparent",
     color: "var(--ink)",
-    fontSize: "13px",
   },
   ".cm-content": { fontFamily: "var(--font-mono)", paddingBottom: "12px" },
   ".cm-scroller": { overflow: "auto", lineHeight: "1.6" },
@@ -162,6 +167,7 @@ function buildExtensions(): Extension[] {
       },
     ]),
     readOnlyComp.of(EditorState.readOnly.of(!editor.editable)),
+    fontSizeComp.of(fontSizeTheme(useSettingsStore().settings.editorFontSize)),
     languageComp.of([]),
     EditorView.updateListener.of((v) => {
       if (v.docChanged) editor.setContent(v.state.doc.toString());
@@ -233,6 +239,14 @@ watch(
   () => editor.previewMode,
   (mode) => {
     if (mode === "source") view?.requestMeasure();
+  },
+);
+
+// 字号设置变更即时生效
+watch(
+  () => useSettingsStore().settings.editorFontSize,
+  (px) => {
+    view?.dispatch({ effects: fontSizeComp.reconfigure(fontSizeTheme(px)) });
   },
 );
 

@@ -16,11 +16,10 @@ import {
   HardDrive,
   House,
   Lock,
-  LogOut,
-  MoreHorizontal,
   Pencil,
   RefreshCw,
   ScrollText,
+  Settings,
   SquareTerminal,
   Trash2,
   TriangleAlert,
@@ -30,9 +29,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { nextTick } from "vue";
 
 import ContextMenu from "@/components/common/ContextMenu.vue";
-import DropdownMenu, { type MenuItem } from "@/components/common/DropdownMenu.vue";
+import type { MenuItem } from "@/components/common/DropdownMenu.vue";
 import Modal from "@/components/common/Modal.vue";
-import ThemeToggle from "@/components/common/ThemeToggle.vue";
 import Breadcrumbs from "@/components/explorer/Breadcrumbs.vue";
 import ChmodDialog from "@/components/explorer/ChmodDialog.vue";
 import FileTable from "@/components/explorer/FileTable.vue";
@@ -42,6 +40,7 @@ import TransferCenter from "@/components/workspace/TransferCenter.vue";
 import { useConnectionsStore } from "@/stores/connections";
 import { useEditorStore } from "@/stores/editor";
 import { useExplorerStore } from "@/stores/explorer";
+import { useSettingsStore } from "@/stores/settings";
 import { useTerminalStore } from "@/stores/terminal";
 import { useTransferStore } from "@/stores/transfer";
 import type { FileEntry } from "@/types";
@@ -56,6 +55,7 @@ const explorer = useExplorerStore();
 const transfers = useTransferStore();
 const editor = useEditorStore();
 const terminalStore = useTerminalStore();
+const settings = useSettingsStore();
 
 /** 双击文本文件 → 打开编辑抽屉 */
 function onOpenFile(entry: FileEntry) {
@@ -77,8 +77,6 @@ const quickLinks = [
   { label: "日志", path: "/var", icon: ScrollText },
 ];
 
-const menuOpen = ref(false);
-
 /** 文件区滚动容器：进入新目录回顶部；原地刷新（文件操作后）保持滚动 */
 const fileAreaRef = ref<HTMLElement | null>(null);
 watch(
@@ -90,32 +88,6 @@ watch(
   },
 );
 
-const menuItems = computed<MenuItem[]>(() => [
-  { key: "refresh", label: "刷新", icon: RefreshCw },
-  {
-    key: "hidden",
-    label: explorer.showHidden ? "隐藏点开头的项目" : "显示点开头的项目",
-    icon: Eye,
-    checked: explorer.showHidden,
-  },
-  { key: "sep", label: "", separator: true },
-  { key: "disconnect", label: "断开连接", icon: LogOut, danger: true },
-]);
-
-function onMenuSelect(key: string) {
-  menuOpen.value = false;
-  switch (key) {
-    case "refresh":
-      explorer.refresh();
-      break;
-    case "hidden":
-      explorer.showHidden = !explorer.showHidden;
-      break;
-    case "disconnect":
-      emit("disconnect");
-      break;
-  }
-}
 
 /** 文件区右键菜单状态 */
 const ctxMenu = ref<{ open: boolean; x: number; y: number; entry: FileEntry | null }>({
@@ -190,8 +162,7 @@ async function onCtxMenuSelect(key: string) {
   if (!entry) {
     if (key === "newDir") explorer.startCreate("dir");
     else if (key === "newFile") explorer.startCreate("file");
-    else if (key === "refresh") explorer.refresh();
-    else if (key === "hidden") explorer.showHidden = !explorer.showHidden;
+    else if (key === "refresh" || key === "refresh2") explorer.refresh();
     return;
   }
   switch (key) {
@@ -326,6 +297,16 @@ function onKeydown(e: KeyboardEvent) {
             <span class="ml-3 truncate">{{ link.label }}</span>
           </button>
         </nav>
+
+        <button
+          type="button"
+          class="nav-item mt-auto"
+          title="设置"
+          @click="settings.openSettings()"
+        >
+          <Settings :size="16" class="ml-1 shrink-0" />
+          <span class="ml-3 truncate">设置</span>
+        </button>
       </aside>
 
     <!-- 主列：地址行卡 + 文件区卡 + 编辑抽屉 + 状态栏 -->
@@ -381,19 +362,6 @@ function onKeydown(e: KeyboardEvent) {
         </button>
 
         <TransferCenter />
-        <ThemeToggle />
-        <div class="relative">
-          <button
-            type="button"
-            class="btn-icon"
-            title="更多选项"
-            aria-label="更多选项"
-            @click="menuOpen = !menuOpen"
-          >
-            <MoreHorizontal :size="16" />
-          </button>
-          <DropdownMenu :open="menuOpen" :items="menuItems" @select="onMenuSelect" @close="menuOpen = false" />
-        </div>
       </div>
 
       <!-- 文件区：FileArea 卡（8 圆角 + 1px 描边） -->

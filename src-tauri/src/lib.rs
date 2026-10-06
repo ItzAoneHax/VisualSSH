@@ -25,6 +25,8 @@ pub fn run() {
             commands::ssh_write_file,
             commands::ssh_disconnect,
             commands::ssh_trust_host,
+            commands::ssh_known_hosts_list,
+            commands::ssh_known_hosts_remove,
             commands::credentials::credential_get,
             commands::credentials::credential_put,
             commands::credentials::credential_delete,

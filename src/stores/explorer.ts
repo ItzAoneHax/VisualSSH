@@ -4,6 +4,7 @@ import { computed, ref } from "vue";
 import { chmodSsh, deleteSsh, listDir, mkdirSsh, renameSsh, touchSsh } from "@/api/ssh";
 import type { FileEntry } from "@/types";
 import { joinPath, parentPath } from "@/utils/format";
+import { useSettingsStore } from "@/stores/settings";
 
 export type SortKey = "name" | "mtime" | "kind" | "size" | "permissions";
 
@@ -211,6 +212,10 @@ export const useExplorerStore = defineStore("explorer", () => {
     entries.value = [];
     error.value = null;
     selectedName.value = null;
+    // 连接初始态应用设置默认值（排序/隐藏项显隐）
+    showHidden.value = useSettingsStore().settings.showHidden;
+    sortKey.value = useSettingsStore().settings.defaultSortKey;
+    sortAsc.value = useSettingsStore().settings.defaultSortKey !== "mtime";
     history.value = [];
     historyIndex.value = -1;
     viaHistory = false;

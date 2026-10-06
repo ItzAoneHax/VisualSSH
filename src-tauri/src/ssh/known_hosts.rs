@@ -59,6 +59,21 @@ impl KnownHosts {
         }
     }
 
+    /// 设置页管理：全部记录（最近新增在前）。
+    pub fn list(&self) -> Vec<HostEntry> {
+        let mut entries = self.entries.clone();
+        entries.reverse();
+        entries
+    }
+
+    /// 设置页管理：删除一条信任记录；返回是否存在。
+    pub fn remove(&mut self, host: &str, port: u16) -> bool {
+        let before = self.entries.len();
+        self.entries
+            .retain(|e| !(e.port == port && e.host.eq_ignore_ascii_case(host)));
+        before != self.entries.len()
+    }
+
     pub fn save(&self) -> Result<()> {
         let path = Self::path()?;
         if let Some(dir) = path.parent() {

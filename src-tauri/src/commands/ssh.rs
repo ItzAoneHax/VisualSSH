@@ -339,3 +339,20 @@ pub async fn ssh_trust_host(
     });
     known.save()
 }
+
+/// 设置页：全部已信任主机记录。
+#[tauri::command]
+pub async fn ssh_known_hosts_list() -> Result<Vec<HostEntry>> {
+    Ok(KnownHosts::load()?.list())
+}
+
+/// 设置页：删除一条信任记录（下次连接将重新触发 TOFU 首次信任）。
+#[tauri::command]
+pub async fn ssh_known_hosts_remove(host: String, port: u16) -> Result<bool> {
+    let mut known = KnownHosts::load()?;
+    let removed = known.remove(host.trim(), port);
+    if removed {
+        known.save()?;
+    }
+    Ok(removed)
+}

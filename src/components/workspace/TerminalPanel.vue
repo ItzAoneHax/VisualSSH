@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 
 import { useTerminalStore } from "@/stores/terminal";
+import { useSettingsStore } from "@/stores/settings";
 
 /**
  * 悬浮终端窗（与编辑器同款形态）：全页模糊遮罩（避开标题栏）+ 居中亚克力窗体，
@@ -95,7 +96,7 @@ async function mountXterm() {
   if (!host.value || xterm || !terminalStore.terminalId) return;
   xterm = new Terminal({
     fontFamily: '"JetBrains Mono Variable", "Cascadia Code", Consolas, monospace',
-    fontSize: 13,
+    fontSize: useSettingsStore().settings.terminalFontSize,
     cursorBlink: true,
     theme: currentTheme(),
     scrollback: 4000,
@@ -207,6 +208,21 @@ function onResizeDown(e: PointerEvent) {
 function toggleMaximized() {
   maximized.value = !maximized.value;
 }
+
+// 字号设置变更：xterm 运行时更新 + 重新 fit
+watch(
+  () => useSettingsStore().settings.terminalFontSize,
+  (px) => {
+    if (!xterm) return;
+    xterm.options.fontSize = px;
+    try {
+      fitAddon?.fit();
+      syncSize();
+    } catch {
+      // 容器不可见时忽略
+    }
+  },
+);
 </script>
 
 <template>

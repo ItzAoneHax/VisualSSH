@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { House, LoaderCircle, Plus, Server, TriangleAlert } from "@lucide/vue";
+import { House, LoaderCircle, Plus, Server, Settings, TriangleAlert } from "@lucide/vue";
 import { computed, ref } from "vue";
 
 import ConnectionCard from "@/components/connection/ConnectionCard.vue";
 import ConnectionForm from "@/components/connection/ConnectionForm.vue";
 import Modal from "@/components/common/Modal.vue";
-import ThemeToggle from "@/components/common/ThemeToggle.vue";
 import { useConnectionsStore } from "@/stores/connections";
+import { useSettingsStore } from "@/stores/settings";
 
 import type { SshProfile } from "@/types";
 
 const connections = useConnectionsStore();
+const settings = useSettingsStore();
 
 const formOpen = ref(false);
 const editingProfile = ref<SshProfile | null>(null);
@@ -75,7 +76,15 @@ function handleRemove(profile: SshProfile) {
         </template>
       </nav>
 
-      <p class="mt-auto px-2.5 pb-2 text-xs text-faint">VisualSSH 0.1.0</p>
+      <button
+        type="button"
+        class="nav-item mt-auto"
+        title="设置"
+        @click="settings.openSettings()"
+      >
+        <Settings :size="16" class="ml-1 shrink-0" />
+        <span class="ml-3 truncate">设置</span>
+      </button>
     </aside>
 
     <!-- 主列：工具栏卡（含「新建」主按钮 + 主页地址药丸）+ 快速访问 widget -->
@@ -96,8 +105,6 @@ function handleRemove(profile: SshProfile) {
           <House :size="14" class="mr-1.5 shrink-0 text-dim" />
           <span class="truncate font-semibold">主页</span>
         </div>
-
-        <ThemeToggle />
       </div>
 
       <div v-if="connections.lastError" class="flex items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-sm" :style="{ background: 'color-mix(in srgb, var(--danger) 10%, transparent)', color: 'var(--danger)' }">

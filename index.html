@@ -9,7 +9,11 @@
       // 首帧前应用主题，避免暗色模式闪白
       try {
         var theme = localStorage.getItem("visualssh:theme") || "dark";
-        if (theme === "dark") document.documentElement.classList.add("dark");
+        var dark =
+          theme === "dark" ||
+          (theme === "system" &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        if (dark) document.documentElement.classList.add("dark");
       } catch (e) {}
     </script>
   </head>

@@ -254,6 +254,33 @@ body {
     border: 1px solid var(--accent);
   }
 
+  /* 设置页卡片（Files SettingsCard：图标 + 标题/说明 + 右侧控件） */
+  .settings-card {
+    @apply flex items-center gap-3.5 rounded-lg px-4 py-3;
+    min-height: 64px;
+    background: var(--fill-control);
+    border: 1px solid var(--line);
+  }
+
+  /* WinUI ToggleSwitch：44×24 轨道 + 16px 滑块 */
+  .toggle-switch {
+    @apply relative h-6 w-11 shrink-0 rounded-full transition-colors;
+    background: var(--line-strong);
+  }
+  .toggle-switch:hover {
+    border-color: var(--faint);
+  }
+  .toggle-switch.on {
+    background: var(--accent);
+  }
+  .toggle-knob {
+    @apply absolute top-1 left-1 h-4 w-4 rounded-full bg-white transition-transform;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+  .toggle-switch.on .toggle-knob {
+    transform: translateX(20px);
+  }
+
   /* Markdown 预览排版（编辑悬浮窗内，body 14 / 行高 1.75） */
   .md-preview {
     @apply px-6 py-4;
