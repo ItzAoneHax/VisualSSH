@@ -150,10 +150,10 @@ onBeforeUnmount(() => {
       aria-label="路径导航"
       @click.self="enterEdit"
     >
-      <!-- 根项：左侧全圆（BreadcrumbBar 根项 radius 16,2,2,16） -->
+      <!-- 根项（悬浮高亮为直角矩形） -->
       <button
         type="button"
-        class="flex h-8 shrink-0 items-center gap-1.5 rounded-l-[16px] rounded-r-[2px] pr-2 pl-3 text-sm transition-colors"
+        class="flex h-8 shrink-0 items-center gap-1.5 rounded-[2px] pr-2 pl-3 text-sm transition-colors"
         :class="explorer.cwd === '/' ? 'font-semibold text-ink' : 'text-dim hover:bg-fill-subtle hover:text-ink'"
         title="/"
         @click.stop="explorer.open('/')"

@@ -417,7 +417,7 @@ body {
 
   /* 侧栏导航项（SidebarStyles：行高 32、图标 16、文字距 12；悬浮高亮为直角矩形） */
   .nav-item {
-    @apply relative flex h-8 w-full items-center pr-2.5 pl-2 text-left text-sm text-ink transition-colors;
+    @apply relative flex h-8 w-full items-center rounded-[2px] pr-2.5 pl-2 text-left text-sm text-ink transition-colors;
   }
   .nav-item:hover {
     background: var(--fill-subtle);
