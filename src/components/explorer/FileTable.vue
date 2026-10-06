@@ -116,10 +116,10 @@ function onBlankClick() {
 <template>
   <!-- 列表容器内边距 8（DetailsLayoutPage ListView padding） -->
   <div class="min-h-full px-2 pb-3" @click="onBlankClick" @contextmenu.prevent="onBlankContextMenu($event)">
-    <!-- 列头：40 高、左距 24、底部分隔线，点击排序 -->
+    <!-- 列头：40 高、左距 24、底部分隔线，点击排序；sticky 钉在文件区顶部 -->
     <div
-      class="grid grid-cols-[minmax(0,1fr)_10rem_6rem_6rem_7rem] items-center border-b pl-6 text-xs text-dim"
-      :style="{ height: '40px', borderColor: 'var(--line)' }"
+      class="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_10rem_6rem_6rem_7rem] items-center border-b pl-6 text-xs text-dim"
+      :style="{ height: '40px', borderColor: 'var(--line)', background: 'var(--panel-solid)' }"
     >
       <button
         v-for="col in columns"

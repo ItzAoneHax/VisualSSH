@@ -13,6 +13,8 @@
 
   /* 卡片面（工具栏/文件区/弹窗）：CardBackgroundFillColorDefault + FileArea */
   --panel: #fcfcfcc0;
+  /* panel 与窗口底色的预混实体色（sticky 列头等需要不透明背景处） */
+  --panel-solid: #fafafa;
   --toolbar: #ffffffb3;
   /* 侧栏层：LayerOnMicaBaseAltFillColorDefault */
   --sidebar: #ffffffb3;
@@ -60,6 +62,7 @@
   --bg: #202020;
 
   --panel: #ffffff0d;
+  --panel-solid: #2b2b2b;
   --toolbar: #ffffff0d;
   --sidebar: #3a3a3a73;
 
