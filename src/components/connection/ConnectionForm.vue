@@ -189,7 +189,7 @@ function save() {
       </template>
 
       <footer class="mt-1 flex justify-end gap-2">
-        <button type="button" class="btn-ghost" @click="emit('close')">取消</button>
+        <button type="button" class="btn-secondary" @click="emit('close')">取消</button>
         <button type="submit" class="btn-primary">保存连接</button>
       </footer>
     </form>

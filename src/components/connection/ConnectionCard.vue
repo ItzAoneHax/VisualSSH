@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { KeyRound, LoaderCircle, Pencil, Trash2, Zap } from "@lucide/vue";
+import { KeyRound, LoaderCircle, MoreHorizontal, Pencil, Server, Trash2, Zap } from "@lucide/vue";
+import { computed, ref } from "vue";
 
+import DropdownMenu, { type MenuItem } from "@/components/common/DropdownMenu.vue";
 import type { SshProfile, TestState } from "@/types";
 
 const props = defineProps<{
@@ -16,91 +18,88 @@ const emit = defineEmits<{
   remove: [profile: SshProfile];
 }>();
 
-function stateClass(state?: TestState): string {
-  if (!state) return "hidden";
-  switch (state.status) {
-    case "ok":
-      return "bg-live/10 text-live";
-    case "fail":
-      return "bg-danger/10 text-danger";
-    case "testing":
-      return "bg-accent/10 text-accent";
-  }
-  return "hidden";
+const menuOpen = ref(false);
+
+const menuItems: MenuItem[] = [
+  { key: "test", label: "测试连接", icon: Zap },
+  { key: "edit", label: "编辑", icon: Pencil },
+  { key: "sep", label: "", separator: true },
+  { key: "remove", label: "删除", icon: Trash2, danger: true },
+];
+
+function onMenuSelect(key: string) {
+  menuOpen.value = false;
+  if (key === "test") emit("test", props.profile);
+  else if (key === "edit") emit("edit", props.profile);
+  else if (key === "remove") emit("remove", props.profile);
 }
+
+/** 测试状态 → chip 文案与配色 */
+const testChip = computed(() => {
+  const state = props.testState;
+  if (!state || state.status === "idle") return null;
+  switch (state.status) {
+    case "testing":
+      return { text: "测试中", cls: "text-accent" };
+    case "ok":
+      return { text: `${state.latencyMs} ms`, cls: "text-live" };
+    case "fail":
+      return { text: "失败", cls: "text-danger" };
+  }
+  return null;
+});
 </script>
 
 <template>
-  <article
-    class="flex flex-col gap-3 rounded-xl border border-line bg-panel p-4 transition-colors hover:border-accent/40"
+  <!-- Files 快速访问磁贴：悬停 Subtle 填充 + 4 圆角，整卡点击即连接 -->
+  <div
+    role="button"
+    tabindex="0"
+    class="group relative flex cursor-default items-center gap-3 rounded-[4px] p-3 transition-colors hover:bg-fill-subtle"
+    :title="testState?.status === 'fail' ? testState.message : `${profile.username}@${profile.host}:${profile.port}`"
+    @click="emit('connect', profile)"
+    @keydown.enter="emit('connect', profile)"
   >
-    <div class="flex items-start justify-between gap-3">
-      <div class="min-w-0">
-        <h3 class="truncate text-[15px] font-bold">{{ profile.alias || profile.host }}</h3>
-        <p class="mt-1 truncate font-mono text-xs text-dim">
-          <span class="mr-1 text-accent">❯</span>{{ profile.username }}@{{ profile.host }}:{{ profile.port }}
-        </p>
-      </div>
-      <span
-        v-if="testState && testState.status !== 'idle'"
-        class="chip shrink-0 font-mono"
-        :class="stateClass(testState)"
-        :title="testState.status === 'fail' ? testState.message : undefined"
-      >
-        <LoaderCircle v-if="testState.status === 'testing'" :size="11" class="animate-spin" />
-        <template v-if="testState.status === 'testing'">测试中</template>
-        <template v-else-if="testState.status === 'ok'">{{ testState.latencyMs }} ms</template>
-        <template v-else>失败</template>
-      </span>
-    </div>
-
-    <p
-      v-if="testState && testState.status === 'fail'"
-      class="truncate text-xs text-danger"
-      :title="testState.message"
+    <!-- 图标块 40×40 -->
+    <span
+      class="flex h-10 w-10 shrink-0 items-center justify-center rounded-[4px]"
+      :style="{ background: 'color-mix(in srgb, var(--accent) 12%, transparent)', color: 'var(--accent)' }"
     >
-      {{ testState.message }}
-    </p>
+      <LoaderCircle v-if="connecting" :size="18" class="animate-spin" />
+      <Server v-else :size="18" />
+    </span>
 
-    <div class="flex items-center gap-1.5 text-xs text-faint">
-      <KeyRound :size="12" />
-      {{ profile.authMethod === "privateKey" ? "私钥认证" : "密码认证" }}
-    </div>
+    <span class="min-w-0 flex-1">
+      <span class="block truncate text-sm font-semibold">{{ profile.alias || profile.host }}</span>
+      <span class="mt-0.5 block truncate text-xs text-dim">
+        <span class="mr-1.5 inline-flex items-center gap-0.5 align-middle text-faint">
+          <KeyRound :size="10" />
+          {{ profile.authMethod === "privateKey" ? "私钥" : "密码" }}
+        </span>
+        <span class="font-mono">{{ profile.username }}@{{ profile.host }}</span>
+      </span>
+      <span
+        v-if="testChip"
+        class="chip mt-1"
+        :class="testChip.cls"
+        :style="{ background: 'var(--fill-subtle)' }"
+      >
+        {{ testChip.text }}
+      </span>
+    </span>
 
-    <div class="mt-auto flex items-center gap-2">
-      <button type="button" class="btn-ghost h-8 px-2.5 text-xs" @click="emit('test', profile)">
-        <LoaderCircle v-if="testState?.status === 'testing'" :size="13" class="animate-spin" />
-        <Zap v-else :size="13" />
-        测试连接
-      </button>
-      <span class="flex-1" />
+    <!-- 悬停浮现的「更多」菜单（Files 磁贴右上角 E712） -->
+    <span class="relative opacity-0 transition-opacity group-hover:opacity-100" @click.stop>
       <button
         type="button"
-        class="btn-icon h-8 w-8"
-        title="编辑"
-        aria-label="编辑连接"
-        @click="emit('edit', profile)"
+        class="btn-icon h-7 w-7"
+        title="更多选项"
+        aria-label="更多选项"
+        @click="menuOpen = !menuOpen"
       >
-        <Pencil :size="14" />
+        <MoreHorizontal :size="14" />
       </button>
-      <button
-        type="button"
-        class="btn-icon h-8 w-8 hover:!text-danger"
-        title="删除"
-        aria-label="删除连接"
-        @click="emit('remove', profile)"
-      >
-        <Trash2 :size="14" />
-      </button>
-      <button
-        type="button"
-        class="btn-primary h-8 px-3 text-xs"
-        :disabled="connecting"
-        @click="emit('connect', profile)"
-      >
-        <LoaderCircle v-if="connecting" :size="13" class="animate-spin" />
-        {{ connecting ? "连接中" : "连接" }}
-      </button>
-    </div>
-  </article>
+      <DropdownMenu :open="menuOpen" :items="menuItems" @select="onMenuSelect" @close="menuOpen = false" />
+    </span>
+  </div>
 </template>
