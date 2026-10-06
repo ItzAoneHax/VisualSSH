@@ -2,6 +2,7 @@
 import {
   ArrowDownUp,
   ArrowLeft,
+  ChevronDown,
   Code,
   Eye,
   Info,
@@ -12,8 +13,9 @@ import {
   Trash2,
 } from "@lucide/vue";
 import { invoke } from "@tauri-apps/api/core";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 
+import DropdownMenu, { type MenuItem } from "@/components/common/DropdownMenu.vue";
 import { useExplorerStore, SORT_KEYS, type SortKey } from "@/stores/explorer";
 import { useSettingsStore, type ThemeMode } from "@/stores/settings";
 
@@ -54,6 +56,24 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = SORT_KEYS.map((key) => (
   key,
   label: { name: "名称", mtime: "修改时间", kind: "类型", size: "大小", permissions: "权限" }[key],
 }));
+
+/** 默认排序列下拉（Files 同款 ComboBox 语义） */
+const sortMenuOpen = ref(false);
+const currentSortLabel = computed(
+  () => SORT_OPTIONS.find((o) => o.key === settings.settings.defaultSortKey)?.label ?? "名称",
+);
+const sortMenuItems = computed<MenuItem[]>(() =>
+  SORT_OPTIONS.map((o) => ({
+    key: o.key,
+    label: o.label,
+    checked: o.key === settings.settings.defaultSortKey,
+  })),
+);
+
+function onSortSelect(key: string) {
+  sortMenuOpen.value = false;
+  setDefaultSort(key as SortKey);
+}
 
 /** —— 控件们 —— */
 
@@ -248,25 +268,30 @@ onMounted(() => {
                 </button>
               </div>
 
-              <!-- 默认排序列 -->
+              <!-- 默认排序列（Files 用 ComboBox：按钮 + 下拉单选） -->
               <div class="settings-card">
                 <ArrowDownUp :size="20" class="shrink-0 text-dim" />
                 <div class="min-w-0 flex-1">
                   <p class="text-sm font-medium">默认排序列</p>
                   <p class="mt-0.5 text-xs text-dim">连接服务器时文件列表的初始排序（下次连接生效）。</p>
                 </div>
-                <div class="flex max-w-56 shrink-0 flex-wrap justify-end gap-1" :style="{ background: 'var(--fill-subtle)' }">
+                <div class="relative shrink-0">
                   <button
-                    v-for="opt in SORT_OPTIONS"
-                    :key="opt.key"
                     type="button"
-                    class="rounded-[4px] px-2 py-1 text-xs font-medium transition-colors"
-                    :class="settings.settings.defaultSortKey === opt.key ? 'text-ink' : 'text-dim hover:text-ink'"
-                    :style="settings.settings.defaultSortKey === opt.key ? { background: 'var(--surface-solid)', boxShadow: '0 1px 2px rgba(0,0,0,0.16)' } : undefined"
-                    @click="setDefaultSort(opt.key)"
+                    class="flex h-8 items-center gap-2 rounded-[4px] px-3 text-sm transition-colors hover:brightness-[0.98]"
+                    :style="{ background: 'var(--fill-control)', border: '1px solid var(--line-strong)' }"
+                    :aria-label="`默认排序列，当前 ${currentSortLabel}`"
+                    @click="sortMenuOpen = !sortMenuOpen"
                   >
-                    {{ opt.label }}
+                    <span>{{ currentSortLabel }}</span>
+                    <ChevronDown :size="14" class="text-dim" :class="sortMenuOpen && 'rotate-180'" />
                   </button>
+                  <DropdownMenu
+                    :open="sortMenuOpen"
+                    :items="sortMenuItems"
+                    @select="onSortSelect"
+                    @close="sortMenuOpen = false"
+                  />
                 </div>
               </div>
             </div>
