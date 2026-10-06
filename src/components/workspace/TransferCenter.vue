@@ -333,17 +333,22 @@ function onCancelMenuSelect(key: string) {
                   <p class="mt-1.5 text-xs text-dim">{{ progressCaption(row) }}</p>
                 </template>
 
-                <!-- 运行中：收起 = 单行进度条；展开 = 速度折线（Files SpeedGraph） -->
+                <!-- 运行中：收起 = 进度条+百分比；展开 = 速度折线（Files SpeedGraph 近似） -->
                 <template v-else>
                   <div v-if="!isExpanded(row.id)">
-                    <div
-                      class="h-1 rounded-full"
-                      :style="{ background: 'var(--fill-subtle)' }"
-                    >
+                    <div class="flex items-center gap-2">
                       <div
-                        class="h-full rounded-full transition-[width] duration-200"
-                        :style="{ width: `${percent(row)}%`, background: 'var(--accent)' }"
-                      />
+                        class="h-1 min-w-0 flex-1 rounded-full"
+                        :style="{ background: 'var(--fill-subtle)' }"
+                      >
+                        <div
+                          class="h-full rounded-full transition-[width] duration-200"
+                          :style="{ width: `${percent(row)}%`, background: 'var(--accent)' }"
+                        />
+                      </div>
+                      <span class="w-9 shrink-0 text-right font-mono text-[11px] tabular-nums text-dim">
+                        {{ Math.floor(percent(row)) }}%
+                      </span>
                     </div>
                     <p class="mt-1.5 truncate text-xs text-dim" :title="progressCaption(row)">
                       {{ progressCaption(row) }}
@@ -352,7 +357,7 @@ function onCancelMenuSelect(key: string) {
                   <div v-else>
                     <div
                       class="relative h-[88px] overflow-hidden rounded-md"
-                      :style="{ border: '1px solid var(--line-strong)' }"
+                      :style="{ border: '1px solid var(--line-strong)', background: 'var(--fill-subtle)' }"
                     >
                       <svg
                         class="absolute inset-0 h-full w-full"
@@ -360,6 +365,24 @@ function onCancelMenuSelect(key: string) {
                         preserveAspectRatio="none"
                         aria-hidden="true"
                       >
+                        <defs>
+                          <linearGradient
+                            :id="`speed-grad-${row.id}`"
+                            x1="0"
+                            y1="0"
+                            x2="0"
+                            y2="1"
+                          >
+                            <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.32" />
+                            <stop offset="100%" stop-color="var(--accent)" stop-opacity="0" />
+                          </linearGradient>
+                        </defs>
+                        <!-- 折线下渐变填充（Files SpeedGraph 的同款手法） -->
+                        <polygon
+                          v-if="speedPoints(row)"
+                          :points="`${speedPoints(row)} 100,32 0,32`"
+                          :fill="`url(#speed-grad-${row.id})`"
+                        />
                         <polyline
                           :points="speedPoints(row)"
                           fill="none"
@@ -370,14 +393,34 @@ function onCancelMenuSelect(key: string) {
                           stroke-linecap="round"
                         />
                       </svg>
-                      <!-- 速度文案叠加右上（Files 同款） -->
-                      <div class="absolute top-1 right-2 text-right">
-                        <p class="text-[10px] text-dim">速度:</p>
-                        <p class="text-[13px] font-semibold">{{ formatSpeed(row.speedBps) }}</p>
+                      <!-- 速度芯片：实体底隔绝折线穿字 -->
+                      <div
+                        class="absolute top-1.5 right-1.5 rounded-[4px] px-2 py-1 text-right shadow-sm"
+                        :style="{ background: 'var(--surface-solid)', border: '1px solid var(--line)' }"
+                      >
+                        <p class="text-[10px] leading-none text-dim">速度</p>
+                        <p class="mt-1 text-[13px] leading-none font-semibold tabular-nums">
+                          {{ formatSpeed(row.speedBps) }}
+                        </p>
                       </div>
                     </div>
-                    <p class="mt-1.5 truncate text-xs text-dim" :title="row.fileName">
-                      {{ row.fileName }} · {{ formatSize(row.bytes) }} / {{ formatSize(row.total) }}
+                    <!-- 展开态保留进度感知：进度条 + 百分比 + 字节数 -->
+                    <div class="mt-2 flex items-center gap-2">
+                      <div
+                        class="h-1 min-w-0 flex-1 rounded-full"
+                        :style="{ background: 'var(--fill-subtle)' }"
+                      >
+                        <div
+                          class="h-full rounded-full transition-[width] duration-200"
+                          :style="{ width: `${percent(row)}%`, background: 'var(--accent)' }"
+                        />
+                      </div>
+                      <span class="w-9 shrink-0 text-right font-mono text-[11px] tabular-nums text-dim">
+                        {{ Math.floor(percent(row)) }}%
+                      </span>
+                    </div>
+                    <p class="mt-1 truncate text-xs text-dim">
+                      {{ formatSize(row.bytes) }} / {{ formatSize(row.total) }}
                     </p>
                   </div>
                 </template>
