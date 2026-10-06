@@ -7,6 +7,10 @@ import { formatMtime, formatSize, kindLabel } from "@/utils/format";
 
 const explorer = useExplorerStore();
 
+const emit = defineEmits<{
+  contextMenu: [payload: { entry: FileEntry | null; x: number; y: number }];
+}>();
+
 /** DetailsLayoutPage 列序：名称 | 修改时间 | 类型 | 大小（+权限） */
 const columns: { key: SortKey; label: string; class: string }[] = [
   { key: "name", label: "名称", class: "" },
@@ -38,18 +42,38 @@ function iconClass(entry: FileEntry): string {
   }
 }
 
-function onRowClick(entry: FileEntry) {
-  explorer.select(explorer.selectedName === entry.name ? null : entry.name);
+/** Windows 资源管理器语义：单击选中（不切换）、Ctrl+单击反选 */
+function onRowClick(entry: FileEntry, e: MouseEvent) {
+  if (e.ctrlKey) {
+    explorer.select(explorer.selectedName === entry.name ? null : entry.name);
+  } else {
+    explorer.select(entry.name);
+  }
 }
 
 function onRowDblClick(entry: FileEntry) {
   if (entry.kind === "dir") explorer.enter(entry.name);
 }
+
+/** 右键未选中项时先选中（资源管理器行为），再上报菜单位置 */
+function onRowContextMenu(entry: FileEntry, e: MouseEvent) {
+  if (explorer.selectedName !== entry.name) explorer.select(entry.name);
+  emit("contextMenu", { entry, x: e.clientX, y: e.clientY });
+}
+
+function onBlankContextMenu(e: MouseEvent) {
+  emit("contextMenu", { entry: null, x: e.clientX, y: e.clientY });
+}
+
+/** 点击列表空白区域清除选中 */
+function onBlankClick() {
+  if (explorer.selectedName) explorer.select(null);
+}
 </script>
 
 <template>
   <!-- 列表容器内边距 8（DetailsLayoutPage ListView padding） -->
-  <div class="min-h-full px-2 pb-3">
+  <div class="min-h-full px-2 pb-3" @click="onBlankClick" @contextmenu.prevent="onBlankContextMenu($event)">
     <!-- 列头：40 高、左距 24、底部分隔线，点击排序 -->
     <div
       class="grid grid-cols-[minmax(0,1fr)_10rem_6rem_6rem_7rem] items-center border-b pl-6 text-xs text-dim"
@@ -97,8 +121,9 @@ function onRowDblClick(entry: FileEntry) {
         role="row"
         :aria-selected="explorer.selectedName === entry.name"
         tabindex="0"
-        @click="onRowClick(entry)"
-        @dblclick="onRowDblClick(entry)"
+        @click.stop="onRowClick(entry, $event)"
+        @dblclick.stop="onRowDblClick(entry)"
+        @contextmenu.stop.prevent="onRowContextMenu(entry, $event)"
         @keydown.enter="entry.kind === 'dir' && explorer.enter(entry.name)"
       >
         <!-- 名称列：图标 16 + 文字距 6（DetailsLayoutPage IconColumn） -->
