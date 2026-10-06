@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use russh::client::{self, Handle};
 use russh::keys::{HashAlg, PrivateKeyWithHashAlg};
+use russh_sftp::client::fs::File as RemoteFile;
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::{FileAttributes, OpenFlags};
 
@@ -207,6 +208,33 @@ impl SshSession {
             .await
             .map_err(|e| Error::ReadDir(format!("{path}: {e}")))?;
         Ok(fs::to_file_entries(read_dir))
+    }
+
+    /// 打开远端文件只读句柄（下载流用；句柄持有期间可释放会话锁继续浏览）。
+    pub async fn open_read(&self, path: &str) -> Result<RemoteFile> {
+        self.sftp
+            .open(path)
+            .await
+            .map_err(|e| Error::Sftp(format!("打开远端文件 {path} 失败: {e}")))
+    }
+
+    /// 创建远端文件写入句柄（上传流用；已存在则截断）。
+    pub async fn open_write(&self, path: &str) -> Result<RemoteFile> {
+        self.sftp
+            .create(path)
+            .await
+            .map_err(|e| Error::Sftp(format!("创建远端文件 {path} 失败: {e}")))
+    }
+
+    /// 读取远端文件大小（下载前确定 total）。
+    pub async fn file_size(&self, path: &str) -> Result<u64> {
+        let meta = self
+            .sftp
+            .metadata(path)
+            .await
+            .map_err(|e| Error::Sftp(format!("读取 {path} 属性失败: {e}")))?;
+        meta.size
+            .ok_or_else(|| Error::Sftp(format!("服务器未返回 {path} 的大小")))
     }
 
     pub async fn disconnect(&self) {

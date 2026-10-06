@@ -37,6 +37,9 @@ pub enum Error {
     #[error("系统凭据存储 — {0}")]
     Credential(String),
 
+    #[error("传输 — {0}")]
+    Transfer(String),
+
     #[error("连接不存在或已断开 — {0}")]
     NoSession(String),
 

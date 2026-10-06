@@ -19,7 +19,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+# fs/io-util：传输中心的本地文件流式读写
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util"] }
+# 原生保存/打开对话框（M3 下载入口）
+tauri-plugin-dialog = "2"
 # 纯 Rust 实现的 SSH 协议栈，无 OpenSSL 依赖，天然跨平台
 russh = "0.64"
 russh-sftp = "3"
