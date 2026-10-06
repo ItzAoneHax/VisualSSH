@@ -176,6 +176,84 @@ pub async fn ssh_list_dir(
         .map_err(|_| Error::Timeout)?
 }
 
+#[tauri::command]
+pub async fn ssh_mkdir(
+    connection_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let handle = state
+        .get(&connection_id)
+        .ok_or_else(|| Error::NoSession(connection_id.clone()))?;
+    let session = handle.session.lock().await;
+    tokio::time::timeout(IO_TIMEOUT, session.mkdir(&path))
+        .await
+        .map_err(|_| Error::Timeout)?
+}
+
+#[tauri::command]
+pub async fn ssh_touch(
+    connection_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let handle = state
+        .get(&connection_id)
+        .ok_or_else(|| Error::NoSession(connection_id.clone()))?;
+    let session = handle.session.lock().await;
+    tokio::time::timeout(IO_TIMEOUT, session.touch(&path))
+        .await
+        .map_err(|_| Error::Timeout)?
+}
+
+#[tauri::command]
+pub async fn ssh_rename(
+    connection_id: String,
+    old_path: String,
+    new_path: String,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let handle = state
+        .get(&connection_id)
+        .ok_or_else(|| Error::NoSession(connection_id.clone()))?;
+    let session = handle.session.lock().await;
+    tokio::time::timeout(IO_TIMEOUT, session.rename(&old_path, &new_path))
+        .await
+        .map_err(|_| Error::Timeout)?
+}
+
+#[tauri::command]
+pub async fn ssh_delete(
+    connection_id: String,
+    path: String,
+    recursive: bool,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let handle = state
+        .get(&connection_id)
+        .ok_or_else(|| Error::NoSession(connection_id.clone()))?;
+    let session = handle.session.lock().await;
+    tokio::time::timeout(IO_TIMEOUT, session.delete(&path, recursive))
+        .await
+        .map_err(|_| Error::Timeout)?
+}
+
+#[tauri::command]
+pub async fn ssh_chmod(
+    connection_id: String,
+    path: String,
+    mode: u32,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let handle = state
+        .get(&connection_id)
+        .ok_or_else(|| Error::NoSession(connection_id.clone()))?;
+    let session = handle.session.lock().await;
+    tokio::time::timeout(IO_TIMEOUT, session.chmod(&path, mode))
+        .await
+        .map_err(|_| Error::Timeout)?
+}
+
 /// 断开并移除会话池中的连接。
 #[tauri::command]
 pub async fn ssh_disconnect(connection_id: String, state: State<'_, AppState>) -> Result<()> {

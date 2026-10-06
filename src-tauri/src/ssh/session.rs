@@ -1,9 +1,11 @@
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
 use russh::client::{self, Handle};
 use russh::keys::PrivateKeyWithHashAlg;
 use russh_sftp::client::SftpSession;
+use russh_sftp::protocol::{FileAttributes, OpenFlags};
 
 use super::fs::{self, FileEntry};
 use crate::error::{Error, Result};
@@ -134,5 +136,92 @@ impl SshSession {
                 "en",
             )
             .await;
+    }
+
+    pub async fn mkdir(&self, path: &str) -> Result<()> {
+        self.sftp
+            .create_dir(path)
+            .await
+            .map_err(|e| Error::Sftp(format!("创建目录 {path} 失败: {e}")))
+    }
+
+    /// 新建空文件：CREATE|WRITE 在文件已存在时不截断（touch 语义）。
+    pub async fn touch(&self, path: &str) -> Result<()> {
+        let file = self
+            .sftp
+            .open_with_flags(path, OpenFlags::CREATE | OpenFlags::WRITE)
+            .await
+            .map_err(|e| Error::Sftp(format!("新建文件 {path} 失败: {e}")))?;
+        file.close()
+            .await
+            .map_err(|e| Error::Sftp(format!("新建文件 {path} 失败: {e}")))
+    }
+
+    pub async fn rename(&self, old_path: &str, new_path: &str) -> Result<()> {
+        self.sftp
+            .rename(old_path, new_path)
+            .await
+            .map_err(|e| Error::Sftp(format!("重命名 {old_path} 为 {new_path} 失败: {e}")))
+    }
+
+    /// 删除单个条目。非递归时按文件删除，失败再按空目录尝试；
+    /// 递归时先删光子项再删目录本身（russh-sftp 没有 remove_dir_all）。
+    pub async fn delete(&self, path: &str, recursive: bool) -> Result<()> {
+        if recursive {
+            return self.delete_tree(path).await;
+        }
+        if self.sftp.remove_file(path).await.is_ok() {
+            return Ok(());
+        }
+        self.sftp
+            .remove_dir(path)
+            .await
+            .map_err(|e| Error::Sftp(format!("删除 {path} 失败: {e}")))
+    }
+
+    /// 递归删除要装箱才能成为合法的递归 async 闭包。
+    fn delete_tree<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move {
+            for entry in self.list_dir(path).await? {
+                let child = join_remote(path, &entry.name);
+                if entry.kind == "dir" {
+                    self.delete_tree(&child).await?;
+                } else {
+                    // 符号链接只删除链接自身，不跟随目标
+                    self.sftp
+                        .remove_file(&child)
+                        .await
+                        .map_err(|e| Error::Sftp(format!("删除 {child} 失败: {e}")))?;
+                }
+            }
+            self.sftp
+                .remove_dir(path)
+                .await
+                .map_err(|e| Error::Sftp(format!("删除目录 {path} 失败: {e}")))
+        })
+    }
+
+    /// 修改权限位（setstat）。mode 由调用方保证只含低 12 位。
+    pub async fn chmod(&self, path: &str, mode: u32) -> Result<()> {
+        let attrs = FileAttributes {
+            permissions: Some(mode & 0o7777),
+            ..FileAttributes::default()
+        };
+        self.sftp
+            .set_metadata(path, attrs)
+            .await
+            .map_err(|e| Error::Sftp(format!("修改 {path} 权限失败: {e}")))
+    }
+}
+
+/// 拼接远程路径（根目录单独处理，避免出现 //x）。
+fn join_remote(dir: &str, name: &str) -> String {
+    if dir == "/" {
+        format!("/{name}")
+    } else {
+        format!("{dir}/{name}")
     }
 }

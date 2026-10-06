@@ -11,6 +11,11 @@ pub fn run() {
             commands::ssh_connect,
             commands::ssh_test,
             commands::ssh_list_dir,
+            commands::ssh_mkdir,
+            commands::ssh_touch,
+            commands::ssh_rename,
+            commands::ssh_delete,
+            commands::ssh_chmod,
             commands::ssh_disconnect,
         ])
         .run(tauri::generate_context!())
