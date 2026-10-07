@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ConnectResult,
   FileEntry,
+  FileKind,
   SshProfileInput,
   TestResult,
 } from "@/types";
@@ -123,6 +124,43 @@ export function execSsh(
   args: string[],
 ): Promise<ExecOutput> {
   return invoke("ssh_exec", { connectionId, program, args });
+}
+
+/** 递归搜索命中：条目元数据 + 相对搜索目录的路径 */
+export interface SearchHit {
+  name: string;
+  kind: FileKind;
+  size: number;
+  permissions: string;
+  mtime: number | null;
+  owner?: string | null;
+  group?: string | null;
+  atime?: number | null;
+  relPath: string;
+}
+
+/** 搜索事件负载（search://result:{searchId}）：批量追加，done=true 终态 */
+export interface SearchProgress {
+  searchId: string;
+  hits: SearchHit[];
+  done: boolean;
+  cancelled: boolean;
+  capped: boolean;
+}
+
+/** 启动递归搜索（exec find 优先，不可用回退 SFTP walk）；结果经事件批量推送 */
+export function searchStart(
+  searchId: string,
+  connectionId: string,
+  dir: string,
+  query: string,
+): Promise<void> {
+  return invoke("ssh_search_start", { searchId, connectionId, dir, query });
+}
+
+/** 请求取消递归搜索；false = 任务不存在或已结束 */
+export function searchCancel(searchId: string): Promise<boolean> {
+  return invoke("ssh_search_cancel", { searchId });
 }
 
 /** 指纹变更经用户确认后，更新 known_hosts 记录（随后重连） */

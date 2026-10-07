@@ -5,7 +5,11 @@ import { computed, nextTick, ref, watch } from "vue";
 import ContextMenu from "@/components/common/ContextMenu.vue";
 import type { MenuItem } from "@/components/common/DropdownMenu.vue";
 import { useClipboardStore } from "@/stores/clipboard";
-import { useExplorerStore, type SortKey } from "@/stores/explorer";
+import {
+  useExplorerStore,
+  type SortKey,
+  type SearchHitRow,
+} from "@/stores/explorer";
 import { useSettingsStore } from "@/stores/settings";
 import type { FileEntry } from "@/types";
 import { formatMtime, formatSize, kindLabel } from "@/utils/format";
@@ -34,12 +38,20 @@ const COLUMN_META: Record<
   },
   owner: { label: "所有者", cellClass: "pl-2.5 text-xs text-dim", headerClass: "pl-2.5" },
   group: { label: "组", cellClass: "pl-2.5 text-xs text-dim", headerClass: "pl-2.5" },
+  path: { label: "位置", cellClass: "pl-2.5 text-xs text-dim", headerClass: "pl-2.5" },
 };
 
-/** 可见列（名称恒在首）与其 grid 模板：名称 minmax(0,1fr) 弹性，其余列 px 宽 */
-const visibleColumns = computed(() =>
-  explorer.columns.filter((c) => c.visible || c.key === "name"),
-);
+/** 递归搜索结果视图（临时插入「位置」列，Files SortOption.Path 专用搜索结果页的作法） */
+const inSearch = computed(() => !!explorer.searchSession);
+const PATH_COL_WIDTH = 192; // 12rem
+
+/** 可见列（名称恒在首；搜索模式在名称后插「位置」列）：名称 minmax(0,1fr) 弹性，其余列 px 宽 */
+const visibleColumns = computed(() => {
+  const cols = explorer.columns.filter((c) => c.visible || c.key === "name");
+  if (!inSearch.value) return cols;
+  const [name, ...rest] = cols;
+  return [name, { key: "path" as SortKey, width: PATH_COL_WIDTH, visible: true }, ...rest];
+});
 
 /** 数据单元格列（名称列模板特殊处理，不进循环） */
 const dataColumns = computed(() => visibleColumns.value.filter((c) => c.key !== "name"));
@@ -69,9 +81,16 @@ function cellText(entry: FileEntry, key: SortKey): string {
       return entry.owner ?? "";
     case "group":
       return entry.group ?? "";
+    case "path":
+      return (entry as SearchHitRow).relPath ?? "";
     default:
       return "";
   }
+}
+
+/** 行标识键：搜索结果按 relPath（不同目录可重名），主视图按名称 */
+function rowKey(entry: FileEntry): string {
+  return explorer.rowKeyOf(entry);
 }
 
 /** 列宽拖拽/双击命中区（列头右缘 4px；名称列恒弹性不提供） */
@@ -161,13 +180,19 @@ watch(
   },
 );
 
-/** 剪切中的行变暗（Files DimItemOpacity 0.4，TransferHelpers.cs:125-132） */
+/** 剪切中的行变暗（Files DimItemOpacity 0.4，TransferHelpers.cs:125-132）；搜索结果视图不适用 */
 function isCutRow(entry: FileEntry): boolean {
+  if (inSearch.value) return false;
   return clip.isCut(explorer.connectionId, explorer.cwd, entry.name);
 }
 
-/** 单击打开（Files SingleClickToOpen）：无修饰键单击直接进入/打开 */
+/** 单击打开（Files SingleClickToOpen）：无修饰键单击直接进入/打开。
+ *  搜索结果视图：双击/单击目录 = 退出搜索并进入所在目录（文件不打开编辑器） */
 function openEntry(entry: FileEntry) {
+  if (inSearch.value) {
+    if (entry.kind === "dir") explorer.enterSearchEntry((entry as SearchHitRow).relPath);
+    return;
+  }
   if (entry.kind === "dir") explorer.enter(entry.name);
   else emit("openFile", entry);
 }
@@ -240,14 +265,15 @@ function iconClass(entry: FileEntry): string {
 /** Windows 资源管理器语义：单击单选 / Ctrl+单击反选 / Shift+单击范围；
  *  开启「单击打开」后，无修饰键单击 = 打开 */
 function onRowClick(entry: FileEntry, e: MouseEvent) {
+  const key = rowKey(entry);
   if (e.ctrlKey) {
-    explorer.toggleSelect(entry.name);
+    explorer.toggleSelect(key);
   } else if (e.shiftKey) {
-    explorer.selectRange(entry.name);
+    explorer.selectRange(key);
   } else if (settings.settings.singleClickOpen) {
     openEntry(entry);
   } else {
-    explorer.selectOnly(entry.name);
+    explorer.selectOnly(key);
   }
 }
 
@@ -266,7 +292,7 @@ function onBlankDblClick(e: MouseEvent) {
 
 /** 右键未选中项时先单选（资源管理器行为）；已选中则保持多选 */
 function onRowContextMenu(entry: FileEntry, e: MouseEvent) {
-  if (!explorer.isSelected(entry.name)) explorer.selectOnly(entry.name);
+  if (!explorer.isSelected(rowKey(entry))) explorer.selectOnly(rowKey(entry));
   emit("contextMenu", { entry, x: e.clientX, y: e.clientY });
 }
 
@@ -448,18 +474,18 @@ function onContainerPointerDown(e: PointerEvent) {
       <div v-if="explorer.visibleEntries.length">
         <div
           v-for="entry in explorer.visibleEntries"
-          :key="entry.name"
+          :key="rowKey(entry)"
           class="relative grid cursor-default items-center rounded-[4px] px-3 text-sm transition-colors"
           :style="{ height: `${settings.settings.detailsRowHeight}px`, gridTemplateColumns: gridTemplate }"
           :class="[
-            explorer.isSelected(entry.name)
+            explorer.isSelected(rowKey(entry))
               ? 'bg-row-active hover:bg-row-active-hover'
               : 'hover:bg-row-hover',
             isCutRow(entry) && 'opacity-40',
           ]"
           role="row"
-          :data-row="entry.name"
-          :aria-selected="explorer.isSelected(entry.name)"
+          :data-row="rowKey(entry)"
+          :aria-selected="explorer.isSelected(rowKey(entry))"
           tabindex="0"
           @click.stop="onRowClick(entry, $event)"
           @dblclick.stop="onRowDblClick(entry)"
@@ -468,7 +494,7 @@ function onContainerPointerDown(e: PointerEvent) {
         >
           <!-- 选中指示竖条（WinUI ListViewItemPresenter SelectionIndicator：3×16、1.5 圆角、左缘居中） -->
           <span
-            v-if="explorer.isSelected(entry.name)"
+            v-if="explorer.isSelected(rowKey(entry))"
             class="pointer-events-none absolute top-1/2 left-0 h-4 w-[3px] -translate-y-1/2 rounded-[1.5px] bg-accent"
             aria-hidden="true"
           />
@@ -497,7 +523,9 @@ function onContainerPointerDown(e: PointerEvent) {
             <span
               v-else
               class="truncate pl-1.5"
-              :title="settings.settings.showFileExtensions ? undefined : entry.name"
+              :title="inSearch
+                ? (entry as SearchHitRow).relPath
+                : settings.settings.showFileExtensions ? undefined : entry.name"
             >{{ displayName(entry) }}</span>
           </span>
           <!-- 其余列：caption 12、次级文字（ColumnContentTextBlock opacity .6） -->

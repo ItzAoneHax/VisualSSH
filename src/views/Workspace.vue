@@ -14,6 +14,7 @@ import {
   FilePlus,
   FolderOpen,
   FolderPlus,
+  FolderSearch,
   FolderTree,
   HardDrive,
   History,
@@ -27,6 +28,7 @@ import {
   Search,
   Settings,
   SquareTerminal,
+  StopCircle,
   TextSelect,
   Trash2,
   TriangleAlert,
@@ -95,8 +97,11 @@ function onOpenTerminal() {
   if (connectionId) void terminalStore.openIn(explorer.cwd, connectionId);
 }
 
-/** —— 地址栏搜索：面包屑收缩 + 搜索框展开（即时过滤当前目录） —— */
+/** —— 地址栏搜索：面包屑收缩 + 搜索框展开（即时过滤当前目录；
+ *  Enter / 下拉提示项进入递归结果模式） —— */
 const searchOpen = ref(false);
+/** 搜索框聚焦态（下拉提示/历史仅聚焦时展示） */
+const searchFocused = ref(false);
 
 function toggleSearch() {
   if (searchOpen.value) {
@@ -109,7 +114,29 @@ function toggleSearch() {
 
 function closeSearch() {
   searchOpen.value = false;
-  explorer.searchQuery = "";
+  explorer.exitSearch(true);
+}
+
+/** 搜索框 Enter：非空词进入递归搜索（当前目录为根） */
+function onSearchEnter() {
+  if (explorer.searchQuery.trim()) {
+    explorer.startRecursiveSearch(explorer.searchQuery);
+  }
+}
+
+/** 搜索框 Esc：结果模式先退出回原目录，否则收起搜索框 */
+function onSearchEsc() {
+  if (explorer.searchSession) {
+    explorer.exitSearch(true);
+  } else {
+    closeSearch();
+  }
+}
+
+/** 下拉提示项点击（mousedown.prevent 保住输入框焦点） */
+function onSuggestionSearch(query: string) {
+  explorer.searchQuery = query;
+  explorer.startRecursiveSearch(query);
 }
 
 /** 右键项在多选集合内 → 整个集合；否则单项 / 当前选择（Delete 同款规则） */
@@ -448,6 +475,12 @@ const selectedSizeLabel = computed(() => {
   return hasFile ? formatSize(bytes) : "";
 });
 
+/** 搜索横幅中的目录名（根目录显示 /） */
+const searchDirName = computed(() => {
+  const dir = explorer.searchSession?.dir ?? "";
+  return dir === "/" ? "/" : (pathBaseName(dir) || dir);
+});
+
 /** 文件区右键菜单状态 */
 const ctxMenu = ref<{ open: boolean; x: number; y: number; entry: FileEntry | null }>({
   open: false,
@@ -531,8 +564,33 @@ function onFileContextMenu(payload: { entry: FileEntry | null; x: number; y: num
   ctxMenu.value = { open: true, ...payload };
 }
 
+/** 搜索结果行的完整远端路径（搜索根 + relPath） */
+function searchHitFullPath(entry: FileEntry): string {
+  const session = explorer.searchSession;
+  const rel = (entry as { relPath?: string }).relPath ?? entry.name;
+  return session ? joinPath(session.dir, rel) : joinPath(explorer.cwd, entry.name);
+}
+
 const ctxMenuItems = computed<MenuItem[]>(() => {
   const entry = ctxMenu.value.entry;
+  // 递归搜索结果视图：操作依赖完整路径而非当前目录条目，仅保留三项
+  if (explorer.searchSession) {
+    const items: MenuItem[] = [];
+    if (entry?.kind === "dir") {
+      items.push({ key: "open", label: "打开", icon: FolderOpen });
+      items.push({ key: "sepS1", label: "", separator: true });
+    }
+    items.push(
+      { key: "copyPath", label: "复制路径", icon: ClipboardCopy },
+      {
+        key: "download",
+        label: "下载到…",
+        icon: Download,
+        disabled: !entry || entry.kind !== "file",
+      },
+    );
+    return items;
+  }
   if (!entry) {
     return [
       { key: "newDir", label: "新建文件夹", icon: FolderPlus },
@@ -585,6 +643,24 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
 async function onCtxMenuSelect(key: string) {
   const entry = ctxMenu.value.entry;
   ctxMenu.value = { ...ctxMenu.value, open: false };
+  // 递归搜索结果分支：按完整路径操作
+  if (explorer.searchSession) {
+    if (!entry) return;
+    if (key === "open") {
+      explorer.enterSearchEntry((entry as { relPath?: string }).relPath ?? entry.name);
+    } else if (key === "copyPath") {
+      await copyText(searchHitFullPath(entry));
+    } else if (key === "download") {
+      if (entry.kind !== "file") return;
+      const target = await save({ defaultPath: entry.name });
+      if (!target) return;
+      const connectionId = connections.active?.connectionId;
+      if (connectionId) {
+        await transfers.startDownload(connectionId, searchHitFullPath(entry), target);
+      }
+    }
+    return;
+  }
   if (!entry) {
     if (key === "newDir") explorer.startCreate("dir");
     else if (key === "newFile") explorer.startCreate("file");
@@ -867,7 +943,7 @@ function onKeydown(e: KeyboardEvent) {
           </div>
 
           <div
-            class="flex h-[34px] shrink-0 items-center overflow-hidden rounded-[4px]"
+            class="flex h-[34px] shrink-0 items-center overflow-visible rounded-[4px]"
             :style="{
               width: searchOpen ? '250px' : '0px',
               padding: searchOpen ? '0px 10px' : '0px',
@@ -879,14 +955,17 @@ function onKeydown(e: KeyboardEvent) {
                 'width 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-width 0.1s linear, padding 0.1s linear',
             }"
           >
-            <div class="flex h-full w-[228px] shrink-0 items-center gap-1.5">
+            <div class="relative flex h-full w-[228px] shrink-0 items-center gap-1.5">
               <Search :size="14" class="shrink-0 text-dim" />
               <input
                 v-model="explorer.searchQuery"
                 class="h-full min-w-0 flex-1 bg-transparent text-sm text-ink outline-none"
                 placeholder="搜索当前目录"
                 aria-label="搜索当前目录"
-                @keydown.esc.stop="closeSearch"
+                @focus="searchFocused = true"
+                @blur="searchFocused = false"
+                @keydown.enter.prevent="onSearchEnter"
+                @keydown.esc.stop="onSearchEsc"
               />
               <button
                 v-if="explorer.searchQuery"
@@ -898,6 +977,38 @@ function onKeydown(e: KeyboardEvent) {
               >
                 <X :size="13" />
               </button>
+
+              <!-- 下拉提示：输入非空 → 「在子目录中搜索」；聚焦且为空 → 搜索历史（点击即执行） -->
+              <Transition name="popup">
+                <div
+                  v-if="searchOpen && searchFocused && (explorer.searchQuery.trim() || (!explorer.searchQuery && explorer.searchHistory.length))"
+                  class="absolute top-[38px] right-0 z-50 min-w-full overflow-hidden rounded-lg shadow-xl"
+                  :style="{ background: 'var(--surface-solid)', border: '1px solid var(--stroke-flyout)' }"
+                >
+                  <template v-if="explorer.searchQuery.trim()">
+                    <button
+                      type="button"
+                      class="flex h-8 w-full items-center gap-2.5 px-3 text-left text-sm whitespace-nowrap transition-colors hover:bg-fill-subtle"
+                      @mousedown.prevent="onSuggestionSearch(explorer.searchQuery.trim())"
+                    >
+                      <FolderSearch :size="14" class="shrink-0 text-dim" />
+                      在子目录中搜索「{{ explorer.searchQuery.trim() }}」
+                    </button>
+                  </template>
+                  <template v-else>
+                    <button
+                      v-for="q in explorer.searchHistory"
+                      :key="q"
+                      type="button"
+                      class="flex h-8 w-full items-center gap-2.5 px-3 text-left text-sm whitespace-nowrap transition-colors hover:bg-fill-subtle"
+                      @mousedown.prevent="onSuggestionSearch(q)"
+                    >
+                      <History :size="14" class="shrink-0 text-faint" />
+                      {{ q }}
+                    </button>
+                  </template>
+                </div>
+              </Transition>
             </div>
           </div>
         </div>
@@ -954,6 +1065,46 @@ function onKeydown(e: KeyboardEvent) {
           >
             <ClipboardCopy :size="15" class="shrink-0 text-accent" />
             <span class="min-w-0 flex-1 truncate text-xs text-dim">{{ hint }}</span>
+          </div>
+          <!-- 递归搜索横幅：进行中（停止）/ 完成（关闭）；达封顶提示 -->
+          <div
+            v-if="explorer.searchSession"
+            class="m-2 flex items-center gap-2.5 rounded-lg px-3.5 py-2.5"
+            :style="{ background: 'color-mix(in srgb, var(--accent) 8%, transparent)' }"
+          >
+            <FolderSearch :size="15" class="shrink-0 text-accent" />
+            <span class="min-w-0 flex-1 truncate text-xs text-dim">
+              <template v-if="explorer.searchSession.running">
+                正在「{{ searchDirName }}」中搜索「{{ explorer.searchSession.query }}」 —— 已找到
+                {{ explorer.searchSession.hits.length }} 项
+              </template>
+              <template v-else>
+                {{ explorer.searchSession.cancelled ? "已停止 — " : "" }}在「{{ searchDirName }}」中搜索「{{
+                  explorer.searchSession.query
+                }}」 —— 共 {{ explorer.searchSession.hits.length }} 项
+              </template>
+              <span v-if="explorer.searchSession.capped" class="text-accent">
+                （已达 {{ 2000 }} 条上限，仅显示部分结果）
+              </span>
+            </span>
+            <button
+              v-if="explorer.searchSession.running"
+              type="button"
+              class="btn-secondary h-7 px-2 text-xs"
+              @click="explorer.stopSearch()"
+            >
+              <StopCircle :size="13" class="mr-1 inline" />停止
+            </button>
+            <button
+              v-else
+              type="button"
+              class="btn-icon h-6 w-6 shrink-0"
+              title="关闭搜索结果"
+              aria-label="关闭搜索结果"
+              @click="explorer.exitSearch(true)"
+            >
+              <X :size="13" />
+            </button>
           </div>
           <FileTable @context-menu="onFileContextMenu" @open-file="onOpenFile" />
         </div>

@@ -338,6 +338,42 @@ pub async fn ssh_exec(
         .map_err(|_| Error::Timeout)?
 }
 
+/// 启动递归搜索并立即返回；结果经 search://result:{search_id} 事件批量推送
+/// （exec find 优先，通道不可用回退 SFTP walk，见 search.rs）。
+#[tauri::command]
+pub async fn ssh_search_start(
+    search_id: String,
+    connection_id: String,
+    dir: String,
+    query: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    search: State<'_, Arc<crate::search::SearchManager>>,
+) -> Result<()> {
+    let session = state
+        .get(&connection_id)
+        .ok_or_else(|| Error::NoSession(connection_id.clone()))?;
+    tauri::async_runtime::spawn(crate::search::run_search(
+        app,
+        Arc::clone(&search),
+        session,
+        search_id,
+        connection_id,
+        dir,
+        query,
+    ));
+    Ok(())
+}
+
+/// 请求取消搜索；false = 任务不存在或已结束。
+#[tauri::command]
+pub async fn ssh_search_cancel(
+    search_id: String,
+    search: State<'_, Arc<crate::search::SearchManager>>,
+) -> Result<bool> {
+    Ok(search.cancel(&search_id))
+}
+
 /// 断开并移除会话池中的连接；同时取消该连接的全部传输/统计并关闭其全部终端。
 #[tauri::command]
 pub async fn ssh_disconnect(
@@ -346,10 +382,12 @@ pub async fn ssh_disconnect(
     transfers: State<'_, crate::transfer::TransferManager>,
     terminals: State<'_, std::sync::Arc<crate::terminal::TerminalManager>>,
     stats: State<'_, std::sync::Arc<crate::stats::StatsManager>>,
+    search: State<'_, Arc<crate::search::SearchManager>>,
 ) -> Result<()> {
     transfers.cancel_for_connection(&connection_id);
     terminals.close_for_connection(&connection_id);
     stats.cancel_for_connection(&connection_id);
+    search.cancel_for_connection(&connection_id);
     if let Some(handle) = state.remove(&connection_id) {
         let session = handle.session.lock().await;
         session.disconnect().await;

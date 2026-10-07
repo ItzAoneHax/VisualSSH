@@ -34,8 +34,10 @@ const SORT_LABELS: Record<SortKey, string> = {
   permissions: "权限",
   owner: "所有者",
   group: "组",
+  path: "位置",
 };
 
+/** 默认排序列下拉（path 排序键专用于搜索结果页，不入全局默认与目录记忆） */
 const SORT_OPTIONS: { key: SortKey; label: string }[] = SORT_KEYS.map((key) => ({
   key,
   label: SORT_LABELS[key],

@@ -3,7 +3,7 @@ use russh_sftp::protocol::FileType;
 use serde::Serialize;
 
 /// 传给前端的文件条目，字段与 src/types/index.ts 的 FileEntry 对应。
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FileEntry {
     pub name: String,
@@ -62,8 +62,19 @@ pub(crate) fn to_file_entries(read_dir: ReadDir) -> Vec<FileEntry> {
     entries
 }
 
+/// 从 FileAttributes.permissions 的文件类型位（S_IFMT）判定 kind；
+/// 递归搜索 stat 补元数据时用（readdir 的 entry.file_type() 此处不可得）。
+pub(crate) fn kind_from_mode(permissions: Option<u32>) -> &'static str {
+    match permissions.map(|m| m & 0o170000) {
+        Some(0o040000) => "dir",
+        Some(0o120000) => "symlink",
+        Some(0o100000) => "file",
+        _ => "other",
+    }
+}
+
 /// 把 SFTP 返回的八进制权限位渲染为 rwx 字符串。
-fn mode_string(permissions: Option<u32>, kind: &str) -> String {
+pub(crate) fn mode_string(permissions: Option<u32>, kind: &str) -> String {
     const RWX: [char; 3] = ['r', 'w', 'x'];
     let type_char = match kind {
         "dir" => 'd',

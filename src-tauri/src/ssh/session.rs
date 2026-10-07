@@ -298,13 +298,20 @@ impl SshSession {
 
     /// 读取远端文件大小（下载前确定 total）。
     pub async fn file_size(&self, path: &str) -> Result<u64> {
-        let meta = self
-            .sftp
-            .metadata(path)
-            .await
-            .map_err(|e| Error::Sftp(format!("读取 {path} 属性失败: {e}")))?;
+        let meta = self.stat(path).await?;
         meta.size
             .ok_or_else(|| Error::Sftp(format!("服务器未返回 {path} 的大小")))
+    }
+
+    /// 读取任意路径的属性（递归搜索给结果条目补元数据用）。
+    pub async fn stat(
+        &self,
+        path: &str,
+    ) -> Result<FileAttributes> {
+        self.sftp
+            .metadata(path)
+            .await
+            .map_err(|e| Error::Sftp(format!("读取 {path} 属性失败: {e}")))
     }
 
     pub async fn disconnect(&self) {
@@ -481,7 +488,7 @@ pub struct ExecOutput {
 }
 
 /// POSIX 单引号包裹：内部 ' 转义为 '\''，杜绝远端文件名注入。
-fn shell_quote(s: &str) -> String {
+pub(crate) fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 

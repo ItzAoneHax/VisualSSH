@@ -1,6 +1,7 @@
 mod clipboard_vfile;
 mod commands;
 mod error;
+mod search;
 mod ssh;
 mod state;
 mod stats;
@@ -14,6 +15,7 @@ pub fn run() {
         .manage(transfer::TransferManager::default())
         .manage(std::sync::Arc::new(terminal::TerminalManager::default()))
         .manage(std::sync::Arc::new(stats::StatsManager::default()))
+        .manage(std::sync::Arc::new(search::SearchManager::default()))
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::ssh_connect,
@@ -28,6 +30,8 @@ pub fn run() {
             commands::ssh_write_file,
             commands::ssh_read_link,
             commands::ssh_exec,
+            commands::ssh_search_start,
+            commands::ssh_search_cancel,
             commands::ssh_disconnect,
             commands::ssh_trust_host,
             commands::ssh_known_hosts_list,

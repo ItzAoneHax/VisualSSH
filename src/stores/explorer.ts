@@ -1,6 +1,12 @@
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
+import {
+  searchCancel,
+  searchStart,
+  type SearchProgress,
+} from "@/api/ssh";
 import { chmodSsh, deleteSsh, listDir, mkdirSsh, renameSsh, touchSsh } from "@/api/ssh";
 import type { FileEntry } from "@/types";
 import { joinPath, parentPath } from "@/utils/format";
@@ -11,7 +17,16 @@ import {
 } from "@/stores/folderPrefs";
 import { useSettingsStore } from "@/stores/settings";
 
-export type SortKey = "name" | "mtime" | "kind" | "size" | "permissions" | "owner" | "group";
+/** path 排序键专用于搜索结果页（Files SortOption.Path），不写入目录记忆 */
+export type SortKey =
+  | "name"
+  | "mtime"
+  | "kind"
+  | "size"
+  | "permissions"
+  | "owner"
+  | "group"
+  | "path";
 
 export const SORT_KEYS: SortKey[] = [
   "name",
@@ -33,6 +48,36 @@ export const DEFAULT_COLUMNS: ColumnState[] = [
   { key: "owner", width: 128, visible: false },
   { key: "group", width: 128, visible: false },
 ];
+
+/** 搜索结果行：条目元数据 + 相对路径（FileEntry 超集） */
+export interface SearchHitRow extends FileEntry {
+  relPath: string;
+}
+
+/** 递归搜索会话（进入即表格切换为结果视图；Esc/清词退出回原目录） */
+export interface SearchSession {
+  searchId: string;
+  query: string;
+  dir: string;
+  hits: SearchHitRow[];
+  running: boolean;
+  cancelled: boolean;
+  capped: boolean;
+}
+
+/** 搜索历史（GeneralSettingsService.PreviousSearchQueriesList 语义：去重置顶，上限 10） */
+const SEARCH_HISTORY_KEY = "visualssh:search-history:v1";
+const SEARCH_HISTORY_LIMIT = 10;
+
+function loadSearchHistory(): string[] {
+  try {
+    const raw = localStorage.getItem(SEARCH_HISTORY_KEY);
+    const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * 远程文件浏览器状态（单工作区）。
@@ -69,6 +114,29 @@ export const useExplorerStore = defineStore("explorer", () => {
   /** 地址栏搜索：即时过滤当前目录（名称 contains，不区分大小写；空 = 不过滤） */
   const searchQuery = ref("");
 
+  /** 递归搜索会话（非空 = 结果视图模式） */
+  const searchSession = ref<SearchSession | null>(null);
+  /** 搜索历史（聚焦且输入为空时下拉展示，点击即执行递归搜索） */
+  const searchHistory = ref<string[]>(loadSearchHistory());
+  let unlistenSearch: UnlistenFn | null = null;
+  /** 进入搜索前的主视图排序（退出时恢复） */
+  let savedSort: { key: SortKey; asc: boolean } | null = null;
+
+  function pushSearchHistory(query: string) {
+    const q = query.trim();
+    if (!q) return;
+    const next = [q, ...searchHistory.value.filter((h) => h !== q)].slice(
+      0,
+      SEARCH_HISTORY_LIMIT,
+    );
+    searchHistory.value = next;
+    try {
+      localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next));
+    } catch {
+      // 隐私模式：仅会话内生效
+    }
+  }
+
   /** 就地重命名中的条目名（FileTable 在名称列渲染输入框） */
   const renamingName = ref<string | null>(null);
   /** 新建草稿类型（列表顶部渲染输入行） */
@@ -85,6 +153,8 @@ export const useExplorerStore = defineStore("explorer", () => {
 
   async function open(path: string) {
     if (!connectionId.value || loading.value) return;
+    // 浏览新目录即离开搜索结果视图
+    if (searchSession.value) exitSearch(true);
     loading.value = true;
     error.value = null;
     selectedNames.value = new Set();
@@ -305,11 +375,40 @@ export const useExplorerStore = defineStore("explorer", () => {
     selectedNames.value = new Set();
     anchorName = null;
     searchQuery.value = "";
-    selectAfterLoad.value = null;
+    exitSearch();
     cancelEdit();
   }
 
-  const visibleEntries = computed(() => {
+  const visibleEntries = computed<FileEntry[]>(() => {
+    // 递归搜索结果视图：按主排序键作用于命中集合（path 键即相对路径）
+    if (searchSession.value) {
+      const key = sortKey.value;
+      const asc = sortAsc.value ? 1 : -1;
+      const dirOrder = (e: FileEntry) => (e.kind === "dir" ? 0 : 1);
+      const prio = useSettingsStore().settings.sortPriority === "files" ? -1 : useSettingsStore().settings.sortPriority === "mixed" ? 0 : 1;
+      const rel = (e: FileEntry) => (e as SearchHitRow).relPath ?? "";
+      const compare: Record<SortKey, (a: FileEntry, b: FileEntry) => number> = {
+        name: (a, b) =>
+          a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }),
+        mtime: (a, b) => (a.mtime ?? 0) - (b.mtime ?? 0),
+        kind: (a, b) => a.kind.localeCompare(b.kind),
+        size: (a, b) => a.size - b.size,
+        permissions: (a, b) => a.permissions.localeCompare(b.permissions),
+        owner: (a, b) => compareOptional(a.owner, b.owner),
+        group: (a, b) => compareOptional(a.group, b.group),
+        path: (a, b) =>
+          rel(a).localeCompare(rel(b), undefined, { numeric: true, sensitivity: "base" }),
+      };
+      return searchSession.value.hits.slice().sort((a, b) => {
+        const primary = prio * (dirOrder(a) - dirOrder(b)) || asc * compare[key](a, b);
+        if (primary !== 0) return primary;
+        // 并列时以位置/名称收尾，保证顺序稳定
+        return key === "name"
+          ? asc * compare.path(a, b)
+          : asc * compare.name(a, b);
+      });
+    }
+
     const key = sortKey.value;
     const asc = sortAsc.value ? 1 : -1;
     // 排序优先级（Files SortPriority）：文件夹优先 / 文件优先 / 混合
@@ -331,6 +430,7 @@ export const useExplorerStore = defineStore("explorer", () => {
       permissions: (a, b) => a.permissions.localeCompare(b.permissions),
       owner: (a, b) => compareOptional(a.owner, b.owner),
       group: (a, b) => compareOptional(a.group, b.group),
+      path: () => 0,
     };
 
     const q = searchQuery.value.trim().toLowerCase();
@@ -355,8 +455,8 @@ export const useExplorerStore = defineStore("explorer", () => {
   }
 
   // 目录内容变化后剔除已不存在的选择项（保持其余选择）
-  watch(visibleEntries, (entries) => {
-    const alive = new Set(entries.map((e) => e.name));
+  watch(visibleEntries, (rows) => {
+    const alive = new Set(rows.map((e) => rowKeyOf(e)));
     const kept = [...selectedNames.value].filter((n) => alive.has(n));
     if (kept.length !== selectedNames.value.size) {
       selectedNames.value = new Set(kept);
@@ -371,7 +471,113 @@ export const useExplorerStore = defineStore("explorer", () => {
       // 换列默认升序（方向由设置「降序排序」决定初始态，列头点击不再有列特例）
       sortAsc.value = true;
     }
-    persistFolderPrefs();
+    // 搜索结果是临时视图（含 path 专用键），排序不写入目录记忆
+    if (!searchSession.value) persistFolderPrefs();
+  }
+
+  /** —— 递归搜索（块 D）：结果流式追加，表格临时切换为结果视图 —— */
+
+  /** 搜索模式下行的标识键：结果按 relPath（可能重名），主视图按名称 */
+  function rowKeyOf(entry: FileEntry): string {
+    const row = entry as SearchHitRow;
+    return searchSession.value && row.relPath !== undefined ? row.relPath : entry.name;
+  }
+
+  /** 发起递归搜索：cwd 为根，结果按「位置」排序展示；正在搜索时旧任务先取消 */
+  function startRecursiveSearch(rawQuery: string) {
+    const query = rawQuery.trim();
+    if (!query || !connectionId.value) return;
+    if (searchSession.value) void stopSearch();
+    void unlistenSearch?.();
+    unlistenSearch = null;
+
+    const searchId = crypto.randomUUID();
+    const session: SearchSession = {
+      searchId,
+      query,
+      dir: cwd.value,
+      hits: [],
+      running: true,
+      cancelled: false,
+      capped: false,
+    };
+    searchSession.value = session;
+    // 进入搜索视图默认按位置排序（Files SortOption.Path）；退出时恢复
+    savedSort = { key: sortKey.value, asc: sortAsc.value };
+    sortKey.value = "path";
+    sortAsc.value = true;
+    pushSearchHistory(query);
+
+    void listen<SearchProgress>(`search://result:${searchId}`, (event) => {
+      const payload = event.payload;
+      // 事件可能晚于退出/新搜索到达：只认当前会话
+      const current = searchSession.value;
+      if (!current || current.searchId !== payload.searchId) return;
+      if (payload.hits.length) {
+        current.hits.push(...payload.hits.map((h) => ({ ...h })));
+        // 触发响应式更新（hits 数组引用未变）
+        searchSession.value = { ...current, hits: [...current.hits] };
+      }
+      if (payload.done) {
+        searchSession.value = {
+          ...searchSession.value!,
+          running: false,
+          cancelled: payload.cancelled,
+          capped: payload.capped,
+        };
+        void unlistenSearch?.();
+        unlistenSearch = null;
+      }
+    }).then((unlisten) => {
+      // 期间会话已被替换/退出：立即解除监听
+      if (searchSession.value?.searchId !== searchId) {
+        unlisten();
+        return;
+      }
+      unlistenSearch = unlisten;
+    });
+
+    void searchStart(searchId, connectionId.value, cwd.value, query).catch((e) => {
+      error.value = e instanceof Error ? e.message : String(e);
+      searchSession.value = null;
+      void unlistenSearch?.();
+      unlistenSearch = null;
+    });
+  }
+
+  /** 停止按钮：请求取消后端任务；running 由 done 事件收尾（已找到的结果保留） */
+  async function stopSearch() {
+    const session = searchSession.value;
+    if (session?.running) {
+      try {
+        await searchCancel(session.searchId);
+      } catch {
+        // 任务可能已自然结束
+      }
+    }
+  }
+
+  /** 退出结果视图回原目录（clearQuery=true 时同时清空搜索框） */
+  function exitSearch(clearQuery = false) {
+    void stopSearch();
+    void unlistenSearch?.();
+    unlistenSearch = null;
+    if (savedSort) {
+      sortKey.value = savedSort.key;
+      sortAsc.value = savedSort.asc;
+      savedSort = null;
+    }
+    searchSession.value = null;
+    if (clearQuery) searchQuery.value = "";
+  }
+
+  /** 搜索结果中打开文件夹：退出搜索并进入其所在目录 */
+  function enterSearchEntry(relPath: string) {
+    const session = searchSession.value;
+    if (!session) return;
+    const dir = relPath.split("/").slice(0, -1).join("/");
+    const target = dir ? joinPath(session.dir, dir) : session.dir;
+    void open(target);
   }
 
   /** —— 按目录记忆视图（LayoutPreferencesManager 语义：进入读取、修改即写回） —— */
@@ -439,9 +645,9 @@ export const useExplorerStore = defineStore("explorer", () => {
     anchorName = name;
   }
 
-  /** Shift 范围：锚点 → 当前项（按可见顺序） */
+  /** Shift 范围：锚点 → 当前项（按可见顺序；键为 rowKey，搜索结果即 relPath） */
   function selectRange(name: string) {
-    const names = visibleEntries.value.map((e) => e.name);
+    const names = visibleEntries.value.map((e) => rowKeyOf(e));
     const a = names.indexOf(anchorName ?? name);
     const b = names.indexOf(name);
     if (a < 0 || b < 0) {
@@ -468,9 +674,9 @@ export const useExplorerStore = defineStore("explorer", () => {
     anchorName = null;
   }
 
-  /** 全选（Ctrl+A）：按当前过滤后的可见集合 */
+  /** 全选（Ctrl+A）：按当前过滤后的可见集合（搜索结果按 relPath 键） */
   function selectAll() {
-    const names = visibleEntries.value.map((e) => e.name);
+    const names = visibleEntries.value.map((e) => rowKeyOf(e));
     selectedNames.value = new Set(names);
     anchorName = names.length ? names[names.length - 1] : null;
   }
@@ -478,7 +684,7 @@ export const useExplorerStore = defineStore("explorer", () => {
   /** 反选（Ctrl+I，Files InvertSelectionAction）：可见集合内取补集 */
   function invertSelection() {
     const inverted = visibleEntries.value
-      .map((e) => e.name)
+      .map((e) => rowKeyOf(e))
       .filter((n) => !selectedNames.value.has(n));
     selectedNames.value = new Set(inverted);
     // 锚点移出集合时清除，避免下一次 Shift 范围从不可见锚点起算
@@ -522,6 +728,8 @@ export const useExplorerStore = defineStore("explorer", () => {
     error,
     showHidden,
     searchQuery,
+    searchSession,
+    searchHistory,
     selectedNames,
     sortKey,
     sortAsc,
@@ -566,5 +774,10 @@ export const useExplorerStore = defineStore("explorer", () => {
     chmodEntry,
     setColumnWidth,
     toggleColumn,
+    rowKeyOf,
+    startRecursiveSearch,
+    stopSearch,
+    exitSearch,
+    enterSearchEntry,
   };
 });
