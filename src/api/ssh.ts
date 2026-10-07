@@ -98,9 +98,10 @@ export interface DirStatsProgress {
 export function dirStats(
   connectionId: string,
   path: string,
+  statsId: string,
   subpaths?: string[],
 ): Promise<void> {
-  return invoke("ssh_dir_stats", { connectionId, path, subpaths });
+  return invoke("ssh_dir_stats", { connectionId, path, statsId, subpaths });
 }
 
 /** 请求取消统计任务 */

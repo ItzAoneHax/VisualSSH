@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { File, Folder, Link2 } from "@lucide/vue";
+import { File, Files, Folder, Layers, Link2 } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -31,6 +31,15 @@ const connections = useConnectionsStore();
 const single = computed(() =>
   props.targets?.length === 1 ? props.targets[0] : null,
 );
+
+/** 多选头部图标按选择构成：全文件夹 / 全文件 / 混合 */
+const multiIcon = computed(() => {
+  const targets = props.targets ?? [];
+  if (!targets.length) return Folder;
+  if (targets.every((t) => t.kind === "dir")) return Folder;
+  if (targets.every((t) => t.kind === "file")) return Files;
+  return Layers;
+});
 
 /** 统计状态 */
 const stats = ref<{ files: number; dirs: number; bytes: number } | null>(null);
@@ -111,7 +120,7 @@ async function startStats(connectionId: string, subpaths?: string[]) {
     }
   }
   try {
-    await dirStats(connectionId, props.parentDir, subpaths);
+    await dirStats(connectionId, props.parentDir, statsId, subpaths);
   } catch (e) {
     statsError.value = e instanceof Error ? e.message : String(e);
     statsRunning.value = false;
@@ -186,7 +195,9 @@ function commitRename() {
             <Link2 v-else-if="single.kind === 'symlink'" :size="32" class="text-accent" />
             <File v-else :size="32" class="text-dim" />
           </template>
-          <Folder v-else :size="32" class="text-folder" fill="currentColor" />
+          <Folder v-else-if="multiIcon === Folder" :size="32" class="text-folder" fill="currentColor" />
+          <Files v-else-if="multiIcon === Files" :size="32" class="text-dim" />
+          <Layers v-else :size="32" class="text-dim" />
         </span>
         <div class="min-w-0 flex-1">
           <input
