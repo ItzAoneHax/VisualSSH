@@ -47,7 +47,7 @@ import { useTerminalStore } from "@/stores/terminal";
 import { useTransferStore } from "@/stores/transfer";
 import type { FileEntry } from "@/types";
 import { copyText, joinPath } from "@/utils/format";
-import { readClipboardFiles, stageDir, writeClipboardFiles } from "@/api/clipboard";
+import { copyVirtualFiles, readClipboardFiles } from "@/api/clipboard";
 
 const emit = defineEmits<{
   disconnect: [];
@@ -101,20 +101,25 @@ async function copySelectionToClipboard() {
     return;
   }
   try {
-    const dir = await stageDir();
-    const localOf = (name: string) => `${dir}\\${name}`;
-    const ids = await Promise.all(
-      files.map((f) => transfers.startDownloadTo(connectionId, joinPath(explorer.cwd, f.name), localOf(f.name))),
+    await copyVirtualFiles(
+      connectionId,
+      explorer.cwd,
+      files.map((f) => ({ name: f.name, size: f.size, mtime: f.mtime })),
     );
-    const allDone = await transfers.waitAllDone(ids);
-    if (!allDone) {
-      explorer.error = "部分文件下载失败，未写入剪贴板（详见传输中心）";
-      return;
-    }
-    await writeClipboardFiles(files.map((f) => localOf(f.name)));
+    showCopyHint(files.length);
   } catch (e) {
     explorer.error = e instanceof Error ? e.message : String(e);
   }
+}
+
+/** 「已复制 N 项」轻提示：3 秒自动消失（错误横幅仍走 explorer.error） */
+const copyHint = ref("");
+let copyHintTimer: ReturnType<typeof setTimeout> | undefined;
+
+function showCopyHint(count: number) {
+  copyHint.value = `已复制 ${count} 项 — 在本地资源管理器中粘贴时下载`;
+  clearTimeout(copyHintTimer);
+  copyHintTimer = setTimeout(() => (copyHint.value = ""), 3000);
 }
 
 /** Ctrl+V：读系统剪贴板文件列表（HDROP），逐个上传到当前目录 */
@@ -319,6 +324,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
+  clearTimeout(copyHintTimer);
   unlistenDrag?.();
   // 工作区销毁（断开连接）→ 终端面板复位（pty 由后端 ssh_disconnect 联动关闭）
   terminalStore.reset();
@@ -529,6 +535,15 @@ function onKeydown(e: KeyboardEvent) {
             <button type="button" class="btn-secondary h-7 px-2 text-xs" @click="explorer.refresh()">
               重试
             </button>
+          </div>
+          <!-- 复制轻提示（accent 色，自动消失；与错误横幅同形） -->
+          <div
+            v-if="copyHint"
+            class="m-2 flex items-center gap-2.5 rounded-lg px-3.5 py-2.5"
+            :style="{ background: 'color-mix(in srgb, var(--accent) 8%, transparent)' }"
+          >
+            <ClipboardCopy :size="15" class="shrink-0 text-accent" />
+            <span class="min-w-0 flex-1 truncate text-xs text-dim">{{ copyHint }}</span>
           </div>
           <FileTable @context-menu="onFileContextMenu" @open-file="onOpenFile" />
         </div>

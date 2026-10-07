@@ -1,3 +1,4 @@
+mod clipboard_vfile;
 mod commands;
 mod error;
 mod ssh;
@@ -29,7 +30,7 @@ pub fn run() {
             commands::ssh_known_hosts_remove,
             commands::clipboard::clipboard_read_files,
             commands::clipboard::clipboard_write_files,
-            commands::clipboard::ssh_clipboard_stage_dir,
+            commands::clipboard::ssh_clipboard_copy_virtual,
             commands::credentials::credential_get,
             commands::credentials::credential_put,
             commands::credentials::credential_delete,

@@ -1,6 +1,8 @@
 use clipboard_win::{formats::FileList, get_clipboard, is_format_avail, Setter};
 
+use crate::clipboard_vfile::{self, VirtualFileEntry};
 use crate::error::{Error, Result};
+use crate::state::AppState;
 
 /// 读取系统剪贴板的文件列表（CF_HDROP，本地资源管理器 Ctrl+C 的内容）。
 /// 无文件列表时返回空 Vec（不视为错误）。
@@ -16,8 +18,8 @@ pub async fn clipboard_read_files() -> Result<Vec<String>> {
     }
 }
 
-/// 把一组本地文件路径写入系统剪贴板（CF_HDROP），
-/// 之后可在本地资源管理器 Ctrl+V 粘贴。
+/// 把一组本地文件路径写入系统剪贴板（CF_HDROP）。
+/// 本地 → 远端方向之外的原生能力出口，保留备用。
 #[tauri::command]
 pub async fn clipboard_write_files(paths: Vec<String>) -> Result<()> {
     FileList
@@ -25,14 +27,17 @@ pub async fn clipboard_write_files(paths: Vec<String>) -> Result<()> {
         .map_err(|e| Error::Clipboard(format!("写入系统剪贴板失败: {e}")))
 }
 
-/// 为"远端 → 本地剪贴板"准备暂存目录：%TEMP%/VisualSSH/<uuid>。
-/// 文件先静默下载到这里，全部完成后写入剪贴板。
+/// 远端文件 → OLE 虚拟文件剪贴板（CFSTR_FILEDESCRIPTORW + FILECONTENTS）。
+/// 复制瞬间零下载：粘贴到本地资源管理器时才经 IStream 按需流式拉取。
 #[tauri::command]
-pub async fn ssh_clipboard_stage_dir() -> Result<String> {
-    let dir = std::env::temp_dir()
-        .join("VisualSSH")
-        .join(uuid::Uuid::new_v4().to_string());
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| Error::Clipboard(format!("创建暂存目录失败: {e}")))?;
-    Ok(dir.to_string_lossy().into_owned())
+pub async fn ssh_clipboard_copy_virtual(
+    state: tauri::State<'_, AppState>,
+    connection_id: String,
+    remote_dir: String,
+    files: Vec<VirtualFileEntry>,
+) -> Result<()> {
+    let session = state
+        .get(&connection_id)
+        .ok_or_else(|| Error::NoSession(connection_id.clone()))?;
+    clipboard_vfile::set_virtual_files(session, remote_dir, files).await
 }
