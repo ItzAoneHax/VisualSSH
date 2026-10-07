@@ -140,8 +140,11 @@
   /* Files 使用 Segoe UI Variable（非 Windows 平台回退系统 UI 字体） */
   --font-display: "Segoe UI Variable Text", "Segoe UI", -apple-system,
     "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono Variable", "Cascadia Code", Consolas, ui-monospace,
-    monospace;
+  /* 等宽栈显式带 CJK 回退：JetBrains Mono/Cascadia/Consolas 均无中文字形，
+     不列中文栈时 WebView2 会回退宋体（编辑器中文发涩）；
+     CJK 放在西文之后保证拉丁仍走 JetBrains Mono，中文落到 YaHei UI */
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "Cascadia Code", Consolas,
+    "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", ui-monospace, monospace;
 }
 
 /* ---- 基础 ---- */
@@ -360,9 +363,13 @@ textarea,
     transform: translateX(20px);
   }
 
-  /* Markdown 预览排版（编辑悬浮窗内，body 14 / 行高 1.75） */
+  /* Markdown 预览排版（编辑悬浮窗内，body 14 / 行高 1.75）。
+     正文显式中文字体栈（不依赖 body 的 Segoe UI Variable，真机缺该字体时中文不落宋体）；
+     代码块走 --font-mono（已含 CJK 回退） */
   .md-preview {
     @apply px-6 py-4;
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei UI", "PingFang SC",
+      "Noto Sans CJK SC", sans-serif;
     font-size: 14px;
     line-height: 1.75;
     color: var(--ink);
