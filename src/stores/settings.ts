@@ -149,16 +149,51 @@ export const useSettingsStore = defineStore("settings", () => {
   let mediaQuery: MediaQueryList | null = null;
   const onSystemChange = () => applyDom();
 
+  /** #RRGGBB / #RRGGBBAA → [r,g,b,a0-1]；解析失败返回 null。
+   *  用字符串切片而非位运算：带 alpha 的 8 位 hex 超出 int32 正数范围，移位会得到负数错位值 */
+  function parseHex(hex: string): [number, number, number, number] | null {
+    const m = /^#([0-9a-f]{6}(?:[0-9a-f]{2})?)$/i.exec(hex.trim());
+    if (!m) return null;
+    const h = m[1];
+    return [
+      parseInt(h.slice(0, 2), 16),
+      parseInt(h.slice(2, 4), 16),
+      parseInt(h.slice(4, 6), 16),
+      h.length === 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1,
+    ];
+  }
+
+  /** 标准 alpha 合成：fg 叠在 bg 上（fg.a = 0 时结果 = bg） */
+  function composite(
+    fg: [number, number, number, number],
+    bg: [number, number, number],
+  ): [number, number, number] {
+    const [fr, fgc, fb, fa] = fg;
+    return [
+      Math.round(fr * fa + bg[0] * (1 - fa)),
+      Math.round(fgc * fa + bg[1] * (1 - fa)),
+      Math.round(fb * fa + bg[2] * (1 - fa)),
+    ];
+  }
+
   function applyDom() {
     const preferDark = mediaQuery?.matches ?? false;
     const dark =
       settings.value.theme === "dark" ||
       (settings.value.theme === "system" && preferDark);
     document.documentElement.classList.toggle("dark", dark);
-    document.documentElement.style.setProperty(
-      "--app-bg-tint",
-      settings.value.bgColor,
-    );
+    const rootStyle = document.documentElement.style;
+    rootStyle.setProperty("--app-bg-tint", settings.value.bgColor);
+    // 重算 --panel-solid = 半透明 panel 叠在（tint 叠 bg）上的预混实体色：
+    // sticky 列头保持不透明，且与半透明面板透出 body 的观感一致——
+    // 设置应用背景色后列头不再成为异色块（浅色下仍接近白，深色下随 tint）。
+    const bg: [number, number, number] = dark ? [0x20, 0x20, 0x20] : [0xf3, 0xf3, 0xf3];
+    const panel: [number, number, number, number] = dark
+      ? [255, 255, 255, 0x0d / 255]
+      : [252, 252, 252, 0xc0 / 255];
+    const tint = parseHex(settings.value.bgColor);
+    const solid = composite(panel, tint ? composite(tint, bg) : bg);
+    rootStyle.setProperty("--panel-solid", `rgb(${solid.join(",")})`);
     configureSizeUnit(settings.value.sizeUnit);
   }
 

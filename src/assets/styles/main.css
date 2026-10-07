@@ -13,7 +13,9 @@
 
   /* 卡片面（工具栏/文件区/弹窗）：CardBackgroundFillColorDefault + FileArea */
   --panel: #fcfcfcc0;
-  /* panel 与窗口底色的预混实体色（sticky 列头等需要不透明背景处） */
+  /* panel 与窗口底色的预混实体色（sticky 列头等需要不透明背景处）。
+     设置应用背景色时由 settings store 的 applyDom 按主题动态重算
+     （panel × tint × bg），使列头与半透明面板观感一致 */
   --panel-solid: #fafafa;
   --toolbar: #ffffffb3;
   /* 侧栏层：LayerOnMicaBaseAltFillColorDefault */
