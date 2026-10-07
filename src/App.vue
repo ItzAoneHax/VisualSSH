@@ -70,11 +70,8 @@ const bgImageStyle = computed(() => {
     <div class="min-h-0 flex-1">
       <Transition name="view" mode="out-in">
         <SettingsView v-if="settings.settingsOpen" key="settings" />
-        <Workspace
-          v-else-if="connections.active"
-          :key="connections.active.connectionId"
-          @disconnect="handleDisconnect"
-        />
+        <!-- 多标签后 Workspace 生命周期独立于单个连接（连接数变化不重建） -->
+        <Workspace v-else-if="connections.active" key="workspace" @disconnect="handleDisconnect" />
         <ConnectionManager v-else key="manager" />
       </Transition>
     </div>

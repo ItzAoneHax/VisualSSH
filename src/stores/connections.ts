@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
 import { credentialDelete, credentialGet, credentialKey, credentialPut } from "@/api/credentials";
 import { connectSsh, disconnectSsh, testSsh, trustHost } from "@/api/ssh";
@@ -92,8 +92,13 @@ export const useConnectionsStore = defineStore("connections", () => {
   const lastError = ref<string | null>(null);
   /** 指纹变更待确认（非空时主页弹 ContentDialog） */
   const hostKeyPrompt = ref<HostKeyPrompt | null>(null);
-  /** 当前活跃连接；非空时应用进入工作区视图 */
+  /** 当前活跃连接（多连接，M7 多标签：key = connectionId；标签各自绑定其一） */
+  const byId = ref<Record<string, ActiveConnection>>({});
+  /** 最近一次建立的连接（主页 ⇄ 工作区视图切换的信号） */
   const active = ref<ActiveConnection | null>(null);
+
+  /** 连接数（0 = 主页视图） */
+  const connectionCount = computed(() => Object.keys(byId.value).length);
 
   function persist() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles.value));
@@ -164,13 +169,15 @@ export const useConnectionsStore = defineStore("connections", () => {
     hostKeyPrompt.value = null;
     try {
       const result = await connectSsh(profile.alias, await toInput(profile));
-      active.value = {
+      const conn: ActiveConnection = {
         connectionId: result.connectionId,
         alias: profile.alias,
         profile,
         rootPath: result.rootPath,
         latencyMs: result.latencyMs,
       };
+      byId.value = { ...byId.value, [conn.connectionId]: conn };
+      active.value = conn;
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       const changed = parseHostKeyError(message);
@@ -212,14 +219,18 @@ export const useConnectionsStore = defineStore("connections", () => {
     }
   }
 
+  /** 主页「断开连接」：结束全部连接并清空（工作区组件卸载联动回收标签状态） */
   async function disconnect() {
-    if (!active.value) return;
-    const { connectionId } = active.value;
+    if (!active.value && connectionCount.value === 0) return;
+    const ids = Object.keys(byId.value);
     active.value = null;
-    try {
-      await disconnectSsh(connectionId);
-    } catch {
-      // 会话可能已被服务端断开，直接丢弃本地句柄即可
+    byId.value = {};
+    for (const id of ids) {
+      try {
+        await disconnectSsh(id);
+      } catch {
+        // 会话可能已被服务端断开，直接丢弃本地句柄即可
+      }
     }
   }
 
@@ -229,7 +240,9 @@ export const useConnectionsStore = defineStore("connections", () => {
     connectingId,
     lastError,
     hostKeyPrompt,
+    byId,
     active,
+    connectionCount,
     upsert,
     remove,
     migrateCredentials,
