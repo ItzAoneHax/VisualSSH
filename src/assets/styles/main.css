@@ -155,9 +155,19 @@ body,
 body {
   @apply font-display text-ink antialiased;
   font-size: 14px;
+  /* 全局禁选文本：拖拽只用于框选项目（Explorer 语义），可编辑区域单独恢复 */
+  user-select: none;
   background:
     linear-gradient(var(--app-bg-tint, transparent), var(--app-bg-tint, transparent)),
     var(--bg);
+}
+
+/* 可编辑区域恢复文本选择与光标行为（输入框/就地重命名/编辑器 CodeMirror） */
+input,
+textarea,
+[contenteditable="true"],
+.cm-editor {
+  user-select: text;
 }
 
 * {

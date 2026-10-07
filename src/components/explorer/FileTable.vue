@@ -160,8 +160,9 @@ function hitTest(x1: number, y1: number, x2: number, y2: number): string[] {
 
 function onContainerPointerDown(e: PointerEvent) {
   if (e.button !== 0) return;
-  // 落在行/按钮/输入框上不启动框选
-  if ((e.target as HTMLElement).closest("[data-row], button, input")) return;
+  // 按钮/输入框不启动框选；行上按下也允许拖拽框选（Explorer 语义，文本已全局禁选）
+  if ((e.target as HTMLElement).closest("button, input, textarea, [contenteditable]")) return;
+  const fromRow = !!(e.target as HTMLElement).closest("[data-row]");
   const startX = e.clientX;
   const startY = e.clientY;
   const additive = e.ctrlKey;
@@ -193,8 +194,8 @@ function onContainerPointerDown(e: PointerEvent) {
     if (raf) cancelAnimationFrame(raf);
     if (moved) {
       explorer.applyRubberSelection(hitTest(startX, startY, ev.clientX, ev.clientY), additive);
-    } else {
-      // 未拖动 = 空白单击：清除选择
+    } else if (!fromRow) {
+      // 未拖动的空白单击：清除选择（行上的单击交给行自身 click 处理）
       explorer.clearSelection();
     }
     rubber.value = null;
