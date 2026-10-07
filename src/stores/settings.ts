@@ -61,6 +61,8 @@ export interface AppSettings {
   transferCenterVisibility: TransferCenterVisibility;
   /** 显示文件扩展名（Files HideFileExtension 反相，默认显示；仅影响展示层，重命名仍操作完整名） */
   showFileExtensions: boolean;
+  /** 详情视图行高密度（Files DetailsViewSizeKind：28/36/40/44/48，默认小 36） */
+  detailsRowHeight: number;
 }
 
 const DEFAULTS: AppSettings = {
@@ -85,6 +87,7 @@ const DEFAULTS: AppSettings = {
   conflictsResolveOption: "newName",
   transferCenterVisibility: "always",
   showFileExtensions: true,
+  detailsRowHeight: 36,
 };
 
 function load(): AppSettings {
@@ -106,6 +109,10 @@ function load(): AppSettings {
         : "never";
     }
     delete (parsed as Partial<AppSettings> & { confirmDelete?: boolean }).confirmDelete;
+    // 行高密度只接受五档（LayoutSizeKindHelper.GetDetailsViewRowHeight）
+    if (![28, 36, 40, 44, 48].includes(parsed.detailsRowHeight ?? 36)) {
+      parsed.detailsRowHeight = 36;
+    }
     return { ...DEFAULTS, ...parsed };
   } catch {
     return { ...DEFAULTS };

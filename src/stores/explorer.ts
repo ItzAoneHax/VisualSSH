@@ -4,9 +4,14 @@ import { computed, ref, watch } from "vue";
 import { chmodSsh, deleteSsh, listDir, mkdirSsh, renameSsh, touchSsh } from "@/api/ssh";
 import type { FileEntry } from "@/types";
 import { joinPath, parentPath } from "@/utils/format";
+import {
+  getFolderPref,
+  putFolderPref,
+  type ColumnState,
+} from "@/stores/folderPrefs";
 import { useSettingsStore } from "@/stores/settings";
 
-export type SortKey = "name" | "mtime" | "kind" | "size" | "permissions";
+export type SortKey = "name" | "mtime" | "kind" | "size" | "permissions" | "owner" | "group";
 
 export const SORT_KEYS: SortKey[] = [
   "name",
@@ -14,6 +19,19 @@ export const SORT_KEYS: SortKey[] = [
   "kind",
   "size",
   "permissions",
+  "owner",
+  "group",
+];
+
+/** 详情视图列默认状态（默认宽与 Files DetailsLayoutPage 现状一致；owner/group 默认隐藏） */
+export const DEFAULT_COLUMNS: ColumnState[] = [
+  { key: "name", width: 0, visible: true },
+  { key: "mtime", width: 160, visible: true },
+  { key: "kind", width: 96, visible: true },
+  { key: "size", width: 96, visible: true },
+  { key: "permissions", width: 112, visible: true },
+  { key: "owner", width: 128, visible: false },
+  { key: "group", width: 128, visible: false },
 ];
 
 /**
@@ -22,6 +40,8 @@ export const SORT_KEYS: SortKey[] = [
  */
 export const useExplorerStore = defineStore("explorer", () => {
   const connectionId = ref("");
+  /** 目录记忆/侧栏收藏的键（profile.id；连接切换时更新） */
+  const profileId = ref("");
   const cwd = ref("/");
   const entries = ref<FileEntry[]>([]);
   const loading = ref(false);
@@ -34,6 +54,12 @@ export const useExplorerStore = defineStore("explorer", () => {
   /** 详情视图列排序（Files：点击列头切换，同列翻转方向） */
   const sortKey = ref<SortKey>("name");
   const sortAsc = ref(true);
+
+  function defaultColumns(): ColumnState[] {
+    return DEFAULT_COLUMNS.map((c) => ({ ...c }));
+  }
+  /** 详情视图列状态（宽/显隐，按目录记忆；名称列恒弹性且不可隐藏） */
+  const columns = ref<ColumnState[]>(defaultColumns());
 
   /** 浏览历史（资源管理器 ←/→） */
   const history = ref<string[]>([]);
@@ -72,6 +98,7 @@ export const useExplorerStore = defineStore("explorer", () => {
         history.value = [...history.value.slice(0, historyIndex.value + 1), path];
         historyIndex.value = history.value.length - 1;
       }
+      applyFolderPrefs(path);
       // 返回上级：定位并选中原目录行（滚动由 FileTable 处理）
       const pending = selectAfterLoad.value;
       if (pending) {
@@ -246,25 +273,30 @@ export const useExplorerStore = defineStore("explorer", () => {
     void runOp(() => chmodSsh(connectionId.value, joinPath(cwd.value, name), mode));
   }
 
-  function reset(nextConnectionId: string, rootPath: string) {
+  function reset(nextConnectionId: string, rootPath: string, nextProfileId = "") {
     connectionId.value = nextConnectionId;
+    profileId.value = nextProfileId;
     cwd.value = rootPath;
     entries.value = [];
     error.value = null;
     selectedNames.value = new Set();
     anchorName = null;
-    // 连接初始态应用设置默认值（排序/方向/隐藏项显隐）
-    showHidden.value = useSettingsStore().settings.showHidden;
-    sortKey.value = useSettingsStore().settings.defaultSortKey;
-    sortAsc.value = !useSettingsStore().settings.defaultSortDesc;
+    // 连接初始态应用设置默认值（排序/方向/隐藏项显隐/列状态）
+    const s = useSettingsStore().settings;
+    showHidden.value = s.showHidden;
+    sortKey.value = s.defaultSortKey;
+    sortAsc.value = !s.defaultSortDesc;
+    columns.value = defaultColumns();
     history.value = [];
     historyIndex.value = -1;
     viaHistory = false;
+    selectAfterLoad.value = null;
     void open(rootPath);
   }
 
   function clear() {
     connectionId.value = "";
+    profileId.value = "";
     entries.value = [];
     cwd.value = "/";
     error.value = null;
@@ -273,6 +305,7 @@ export const useExplorerStore = defineStore("explorer", () => {
     selectedNames.value = new Set();
     anchorName = null;
     searchQuery.value = "";
+    selectAfterLoad.value = null;
     cancelEdit();
   }
 
@@ -296,6 +329,8 @@ export const useExplorerStore = defineStore("explorer", () => {
       kind: (a, b) => a.kind.localeCompare(b.kind),
       size: (a, b) => a.size - b.size,
       permissions: (a, b) => a.permissions.localeCompare(b.permissions),
+      owner: (a, b) => compareOptional(a.owner, b.owner),
+      group: (a, b) => compareOptional(a.group, b.group),
     };
 
     const q = searchQuery.value.trim().toLowerCase();
@@ -303,8 +338,21 @@ export const useExplorerStore = defineStore("explorer", () => {
       .filter((e) => showHidden.value || !e.name.startsWith("."))
       .filter((e) => !q || e.name.toLowerCase().includes(q))
       .slice()
-      .sort((a, b) => prio * (dirOrder(a) - dirOrder(b)) || asc * compare[key](a, b));
+      .sort((a, b) => {
+        const primary = prio * (dirOrder(a) - dirOrder(b)) || asc * compare[key](a, b);
+        // 非名称键并列时以名称做次级排序（方向跟随主方向，SortingHelper.cs:31-93）
+        if (primary !== 0 || key === "name") return primary;
+        return asc * compare.name(a, b);
+      });
   });
+
+  /** 可空字符串比较（owner/group）：null 视为小于任意值，升序时排在前 */
+  function compareOptional(a?: string | null, b?: string | null): number {
+    if (a == null && b == null) return 0;
+    if (a == null) return -1;
+    if (b == null) return 1;
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+  }
 
   // 目录内容变化后剔除已不存在的选择项（保持其余选择）
   watch(visibleEntries, (entries) => {
@@ -323,6 +371,49 @@ export const useExplorerStore = defineStore("explorer", () => {
       // 换列默认升序（方向由设置「降序排序」决定初始态，列头点击不再有列特例）
       sortAsc.value = true;
     }
+    persistFolderPrefs();
+  }
+
+  /** —— 按目录记忆视图（LayoutPreferencesManager 语义：进入读取、修改即写回） —— */
+
+  /** 进入目录应用记忆：无记忆则重置为默认列 + 设置页默认排序（Files GetDefaultLayoutPreferences） */
+  function applyFolderPrefs(path: string) {
+    const pref = getFolderPref(profileId.value, path);
+    if (pref) {
+      sortKey.value = pref.sortKey;
+      sortAsc.value = !pref.sortDesc;
+      columns.value = pref.columns.map((c) => ({ ...c }));
+    } else {
+      const s = useSettingsStore().settings;
+      sortKey.value = s.defaultSortKey;
+      sortAsc.value = !s.defaultSortDesc;
+      columns.value = defaultColumns();
+    }
+  }
+
+  function persistFolderPrefs() {
+    if (!profileId.value) return;
+    putFolderPref(profileId.value, cwd.value, {
+      sortKey: sortKey.value,
+      sortDesc: !sortAsc.value,
+      columns: columns.value.map((c) => ({ ...c })),
+    });
+  }
+
+  /** 列宽调整结束（拖拽/双击自适应）后写回目录记忆 */
+  function setColumnWidth(key: SortKey, width: number) {
+    const col = columns.value.find((c) => c.key === key);
+    if (!col || key === "name") return;
+    col.width = width;
+    persistFolderPrefs();
+  }
+
+  /** 列显隐切换（名称列不可隐藏） */
+  function toggleColumn(key: SortKey) {
+    const col = columns.value.find((c) => c.key === key);
+    if (!col || key === "name") return;
+    col.visible = !col.visible;
+    persistFolderPrefs();
   }
 
   /** 面包屑分段："/" → []，"/var/log" → ["var", "log"] */
@@ -424,6 +515,7 @@ export const useExplorerStore = defineStore("explorer", () => {
 
   return {
     connectionId,
+    profileId,
     cwd,
     entries,
     loading,
@@ -433,6 +525,7 @@ export const useExplorerStore = defineStore("explorer", () => {
     selectedNames,
     sortKey,
     sortAsc,
+    columns,
     renamingName,
     newDraft,
     opPending,
@@ -471,5 +564,7 @@ export const useExplorerStore = defineStore("explorer", () => {
     renameEntry,
     deleteEntry,
     chmodEntry,
+    setColumnWidth,
+    toggleColumn,
   };
 });

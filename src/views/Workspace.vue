@@ -632,7 +632,11 @@ async function onCtxMenuSelect(key: string) {
 
 onMounted(async () => {
   if (connections.active) {
-    explorer.reset(connections.active.connectionId, connections.active.rootPath);
+    explorer.reset(
+      connections.active.connectionId,
+      connections.active.rootPath,
+      connections.active.profile.id,
+    );
   }
   window.addEventListener("keydown", onKeydown);
   // 系统文件拖入上传（WebView2 dragDropEnabled 默认开启；浏览器预览跳过）

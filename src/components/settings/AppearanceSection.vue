@@ -5,6 +5,7 @@ import {
   Paintbrush,
   Palette,
   PanelBottom,
+  Rows3,
   SquareTerminal,
   X,
   ArrowDownUp,
@@ -113,6 +114,15 @@ const HALIGN_OPTIONS = [
 const TRANSFER_VISIBILITY_OPTIONS = [
   { key: "always", label: "始终显示" },
   { key: "activeOnly", label: "仅传输进行中显示" },
+];
+
+/** 详情视图行高密度（LayoutSizeKindHelper.GetDetailsViewRowHeight 五档） */
+const ROW_HEIGHT_OPTIONS = [
+  { key: "28", label: "紧凑（28px）" },
+  { key: "36", label: "小（36px）" },
+  { key: "40", label: "中（40px）" },
+  { key: "44", label: "大（44px）" },
+  { key: "48", label: "特大（48px）" },
 ];
 
 /** —— 字号步进（编辑器 11–20 / 终端 10–20） —— */
@@ -363,6 +373,21 @@ function stepFontSize(which: "editorFontSize" | "terminalFontSize", delta: numbe
           +
         </button>
       </div>
+    </div>
+
+    <!-- 行高密度（文件区 Ctrl+滚轮可快速升降档） -->
+    <div class="settings-card">
+      <Rows3 :size="20" class="shrink-0 text-dim" />
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium">文件列表行高</p>
+        <p class="mt-0.5 text-xs text-dim">详情视图行高密度，文件区按住 Ctrl 滚动可快速调整。</p>
+      </div>
+      <SettingsSelect
+        :model-value="String(s.detailsRowHeight)"
+        :options="ROW_HEIGHT_OPTIONS"
+        label="文件列表行高"
+        @update:model-value="(key) => settings.update({ detailsRowHeight: Number(key) })"
+      />
     </div>
 
     <!-- 传输中心入口可见性 -->

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ChevronDown, ChevronUp, File, Folder, Link2, SearchX } from "@lucide/vue";
-import { nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 
+import ContextMenu from "@/components/common/ContextMenu.vue";
+import type { MenuItem } from "@/components/common/DropdownMenu.vue";
 import { useClipboardStore } from "@/stores/clipboard";
 import { useExplorerStore, type SortKey } from "@/stores/explorer";
 import { useSettingsStore } from "@/stores/settings";
@@ -11,6 +13,133 @@ import { formatMtime, formatSize, kindLabel } from "@/utils/format";
 const explorer = useExplorerStore();
 const settings = useSettingsStore();
 const clip = useClipboardStore();
+
+/** 列头文案与数据单元格对齐/字体（等宽字体只加在数据单元格上：表头是中文，等宽栈会回退成宋体） */
+const COLUMN_META: Record<
+  SortKey,
+  { label: string; cellClass: string; headerClass: string }
+> = {
+  name: { label: "名称", cellClass: "", headerClass: "pl-3" },
+  mtime: { label: "修改时间", cellClass: "text-xs text-dim", headerClass: "pl-2.5" },
+  kind: { label: "类型", cellClass: "text-xs text-dim", headerClass: "pl-2.5" },
+  size: {
+    label: "大小",
+    cellClass: "text-right text-xs text-dim",
+    headerClass: "pl-2.5 pr-3 text-right",
+  },
+  permissions: {
+    label: "权限",
+    cellClass: "pl-2.5 font-mono text-xs text-dim",
+    headerClass: "pl-2.5",
+  },
+  owner: { label: "所有者", cellClass: "pl-2.5 text-xs text-dim", headerClass: "pl-2.5" },
+  group: { label: "组", cellClass: "pl-2.5 text-xs text-dim", headerClass: "pl-2.5" },
+};
+
+/** 可见列（名称恒在首）与其 grid 模板：名称 minmax(0,1fr) 弹性，其余列 px 宽 */
+const visibleColumns = computed(() =>
+  explorer.columns.filter((c) => c.visible || c.key === "name"),
+);
+
+/** 数据单元格列（名称列模板特殊处理，不进循环） */
+const dataColumns = computed(() => visibleColumns.value.filter((c) => c.key !== "name"));
+
+const gridTemplate = computed(() =>
+  visibleColumns.value
+    .map((c) => (c.key === "name" ? "minmax(0,1fr)" : `${c.width}px`))
+    .join(" "),
+);
+
+const headerLabel = (key: SortKey) => COLUMN_META[key].label;
+const headerClass = (key: SortKey) => COLUMN_META[key].headerClass;
+const cellClass = (key: SortKey) => COLUMN_META[key].cellClass;
+
+/** 数据单元格文本（名称列含图标/重命名，单独在模板里处理） */
+function cellText(entry: FileEntry, key: SortKey): string {
+  switch (key) {
+    case "mtime":
+      return formatMtime(entry.mtime);
+    case "kind":
+      return kindLabel(entry.kind);
+    case "size":
+      return entry.kind === "dir" ? "" : formatSize(entry.size);
+    case "permissions":
+      return entry.permissions;
+    case "owner":
+      return entry.owner ?? "";
+    case "group":
+      return entry.group ?? "";
+    default:
+      return "";
+  }
+}
+
+/** 列宽拖拽/双击命中区（列头右缘 4px；名称列恒弹性不提供） */
+const MIN_COL_WIDTH = 48; // 3rem
+const MAX_FIT_WIDTH = 384; // 24rem（双击自适应上限）
+
+const resizing = ref<{ key: SortKey; startX: number; startWidth: number } | null>(null);
+
+function onResizeHandleDown(key: SortKey, e: PointerEvent) {
+  if (key === "name") return;
+  e.preventDefault();
+  e.stopPropagation();
+  const col = explorer.columns.find((c) => c.key === key);
+  if (!col) return;
+  resizing.value = { key, startX: e.clientX, startWidth: col.width };
+  const onMove = (ev: PointerEvent) => {
+    const r = resizing.value;
+    if (!r) return;
+    const width = Math.max(MIN_COL_WIDTH, r.startWidth + ev.clientX - r.startX);
+    explorer.setColumnWidth(key, width);
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    resizing.value = null;
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+
+/** 双击分隔线自适应列宽（GridSplitter_DoubleTapped）：扫该列单元格 scrollWidth
+ *  最大值 + padding + 排序图标余量 36（Files DetailsLayoutPage.xaml.cs:945-953），上限 24rem */
+function onResizeHandleDblClick(key: SortKey) {
+  if (key === "name") return;
+  let max = 0;
+  for (const el of document.querySelectorAll<HTMLElement>(`[data-col="${key}"]`)) {
+    max = Math.max(max, el.scrollWidth);
+  }
+  if (max <= 0) return;
+  const width = Math.min(Math.max(max + 36, MIN_COL_WIDTH), MAX_FIT_WIDTH);
+  explorer.setColumnWidth(key, width);
+}
+
+/** —— 列头右键菜单：列显隐勾选（名称列不可隐藏；DetailsLayoutPage.xaml:277-411） —— */
+const colMenu = ref<{ open: boolean; x: number; y: number }>({
+  open: false,
+  x: 0,
+  y: 0,
+});
+
+function onHeaderContextMenu(e: MouseEvent) {
+  colMenu.value = { open: true, x: e.clientX, y: e.clientY };
+}
+
+const colMenuItems = computed<MenuItem[]>(() =>
+  explorer.columns
+    .filter((c) => c.key !== "name")
+    .map((c) => ({
+      key: c.key,
+      label: COLUMN_META[c.key].label,
+      checked: c.visible,
+    })),
+);
+
+function onColMenuSelect(key: string) {
+  colMenu.value.open = false;
+  explorer.toggleColumn(key as SortKey);
+}
 
 /** 显示扩展名关闭时，名称单元格展示层去扩展名（点开头文件视为无扩展名不裁剪）；重命名仍操作完整名 */
 function displayName(entry: FileEntry): string {
@@ -86,16 +215,6 @@ function commitDraft() {
   explorer.createEntry(explorer.newDraft, editValue.value);
 }
 
-/** DetailsLayoutPage 列序：名称 | 修改时间 | 类型 | 大小（+权限） */
-const columns: { key: SortKey; label: string; class: string }[] = [
-  { key: "name", label: "名称", class: "" },
-  { key: "mtime", label: "修改时间", class: "w-40" },
-  { key: "kind", label: "类型", class: "w-24" },
-  { key: "size", label: "大小", class: "w-24 text-right" },
-  // 等宽字体只加在数据单元格上：表头是中文，等宽栈会回退成宋体
-  { key: "permissions", label: "权限", class: "w-28 pl-2.5" },
-];
-
 function iconFor(entry: FileEntry) {
   switch (entry.kind) {
     case "dir":
@@ -153,6 +272,20 @@ function onRowContextMenu(entry: FileEntry, e: MouseEvent) {
 
 function onBlankContextMenu(e: MouseEvent) {
   emit("contextMenu", { entry: null, x: e.clientX, y: e.clientY });
+}
+
+/** —— 行高密度（LayoutSizeKindHelper.GetDetailsViewRowHeight）：
+ *  紧凑 28 / 小 36（默认）/ 中 40 / 大 44 / 特大 48；Ctrl+滚轮升降档
+ *  （BaseLayoutViewModel.PointerWheelChanged：上滚增大、下滚减小，饱和即停） —— */
+const ROW_HEIGHTS = [28, 36, 40, 44, 48];
+
+function onWheel(e: WheelEvent) {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  const current = settings.settings.detailsRowHeight;
+  const idx = Math.max(0, ROW_HEIGHTS.indexOf(current));
+  const next = ROW_HEIGHTS[Math.min(ROW_HEIGHTS.length - 1, Math.max(0, e.deltaY < 0 ? idx + 1 : idx - 1))];
+  if (next !== current) settings.update({ detailsRowHeight: next });
 }
 
 /** —— 橡皮筋框选：空白处按下拖动画框，拖动过程中相交行实时选中 —— */
@@ -227,28 +360,30 @@ function onContainerPointerDown(e: PointerEvent) {
 </script>
 
 <template>
-  <!-- 列表容器内边距 8（DetailsLayoutPage ListView padding）；空白拖动 = 橡皮筋框选 -->
+  <!-- 列表容器内边距 8（DetailsLayoutPage ListView padding）；空白拖动 = 橡皮筋框选；Ctrl+滚轮 = 行高密度 -->
   <div
     class="relative min-h-full px-2 pb-3"
     :class="rubberActive && 'select-none'"
     @pointerdown="onContainerPointerDown"
     @dblclick="onBlankDblClick"
     @contextmenu.prevent="onBlankContextMenu($event)"
+    @wheel="onWheel"
   >
-    <!-- 列头：40 高、左距 24、底部分隔线，点击排序；sticky 钉在文件区顶部 -->
+    <!-- 列头：40 高、左距 24、底部分隔线，点击排序；右缘 4px 拖宽/双击自适应；右键勾选列显隐 -->
     <div
-      class="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_10rem_6rem_6rem_7rem] items-center border-b pl-6 text-xs text-dim"
-      :style="{ height: '40px', borderColor: 'var(--line)', background: 'var(--panel-solid)' }"
+      class="sticky top-0 z-10 grid items-center border-b pl-6 text-xs text-dim"
+      :style="{ height: '40px', borderColor: 'var(--line)', background: 'var(--panel-solid)', gridTemplateColumns: gridTemplate }"
+      @contextmenu.prevent="onHeaderContextMenu"
     >
       <button
-        v-for="col in columns"
+        v-for="col in visibleColumns"
         :key="col.key"
         type="button"
-        class="flex h-full items-center gap-1 text-left font-normal hover:text-ink"
-        :class="[col.class, col.key === 'name' ? 'pl-3' : 'pl-2.5']"
+        class="relative flex h-full items-center gap-1 text-left font-normal hover:text-ink"
+        :class="headerClass(col.key)"
         @click="explorer.sortBy(col.key)"
       >
-        {{ col.label }}
+        {{ headerLabel(col.key) }}
         <ChevronUp
           v-if="explorer.sortKey === col.key && explorer.sortAsc"
           :size="12"
@@ -258,6 +393,14 @@ function onContainerPointerDown(e: PointerEvent) {
           v-else-if="explorer.sortKey === col.key"
           :size="12"
           class="text-dim"
+        />
+        <!-- 拖宽/双击自适应命中区（名称列恒弹性不提供；拦下 click 防误触排序） -->
+        <span
+          v-if="col.key !== 'name'"
+          class="absolute top-0 -right-1 z-20 h-full w-2 cursor-col-resize"
+          @pointerdown="onResizeHandleDown(col.key, $event)"
+          @click.stop
+          @dblclick.stop="onResizeHandleDblClick(col.key)"
         />
       </button>
     </div>
@@ -276,8 +419,8 @@ function onContainerPointerDown(e: PointerEvent) {
       <!-- 新建草稿行：列表顶部就地输入名称 -->
       <div
         v-if="explorer.newDraft"
-        class="grid grid-cols-[minmax(0,1fr)_10rem_6rem_6rem_7rem] items-center rounded-[4px] px-3 text-sm"
-        :style="{ height: '36px', background: 'var(--fill-control)' }"
+        class="grid items-center rounded-[4px] px-3 text-sm"
+        :style="{ height: `${settings.settings.detailsRowHeight}px`, background: 'var(--fill-control)', gridTemplateColumns: gridTemplate }"
         @click.stop
         @contextmenu.stop.prevent
       >
@@ -306,8 +449,8 @@ function onContainerPointerDown(e: PointerEvent) {
         <div
           v-for="entry in explorer.visibleEntries"
           :key="entry.name"
-          class="relative grid cursor-default grid-cols-[minmax(0,1fr)_10rem_6rem_6rem_7rem] items-center rounded-[4px] px-3 text-sm transition-colors"
-          :style="{ height: '36px' }"
+          class="relative grid cursor-default items-center rounded-[4px] px-3 text-sm transition-colors"
+          :style="{ height: `${settings.settings.detailsRowHeight}px`, gridTemplateColumns: gridTemplate }"
           :class="[
             explorer.isSelected(entry.name)
               ? 'bg-row-active hover:bg-row-active-hover'
@@ -354,16 +497,17 @@ function onContainerPointerDown(e: PointerEvent) {
             <span
               v-else
               class="truncate pl-1.5"
-              :title="explorer.renamingName === entry.name || settings.settings.showFileExtensions ? undefined : entry.name"
+              :title="settings.settings.showFileExtensions ? undefined : entry.name"
             >{{ displayName(entry) }}</span>
           </span>
-          <!-- 列内容：caption 12、次级文字（ColumnContentTextBlock opacity .6） -->
-          <span class="truncate pl-2.5 text-xs text-dim">{{ formatMtime(entry.mtime) }}</span>
-          <span class="truncate pl-2.5 text-xs text-dim">{{ kindLabel(entry.kind) }}</span>
-          <span class="truncate text-right text-xs text-dim">
-            {{ entry.kind === "dir" ? "" : formatSize(entry.size) }}
-          </span>
-          <span class="truncate pl-2.5 font-mono text-xs text-dim">{{ entry.permissions }}</span>
+          <!-- 其余列：caption 12、次级文字（ColumnContentTextBlock opacity .6） -->
+          <span
+            v-for="col in dataColumns"
+            :key="col.key"
+            :data-col="col.key"
+            class="truncate"
+            :class="cellClass(col.key)"
+          >{{ cellText(entry, col.key) }}</span>
         </div>
       </div>
 
@@ -387,6 +531,16 @@ function onContainerPointerDown(e: PointerEvent) {
         background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
         border: '1px solid var(--accent)',
       }"
+    />
+
+    <!-- 列头右键菜单：列显隐勾选（DetailsLayoutPage 列开关菜单） -->
+    <ContextMenu
+      :open="colMenu.open"
+      :x="colMenu.x"
+      :y="colMenu.y"
+      :items="colMenuItems"
+      @select="onColMenuSelect"
+      @close="colMenu.open = false"
     />
   </div>
 </template>

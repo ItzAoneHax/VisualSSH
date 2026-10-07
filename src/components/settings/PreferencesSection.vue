@@ -26,9 +26,19 @@ const explorer = useExplorerStore();
 // storeToRefs：update() 整体替换 settings.value，直接取 settings.settings 会拿到冻结快照
 const { settings: s } = storeToRefs(settings);
 
-const SORT_OPTIONS = SORT_KEYS.map((key) => ({
+const SORT_LABELS: Record<SortKey, string> = {
+  name: "名称",
+  mtime: "修改时间",
+  kind: "类型",
+  size: "大小",
+  permissions: "权限",
+  owner: "所有者",
+  group: "组",
+};
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = SORT_KEYS.map((key) => ({
   key,
-  label: { name: "名称", mtime: "修改时间", kind: "类型", size: "大小", permissions: "权限" }[key],
+  label: SORT_LABELS[key],
 }));
 
 const PRIORITY_OPTIONS = [
