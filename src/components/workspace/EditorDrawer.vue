@@ -345,6 +345,13 @@ function discardAndClose() {
  *  焦点在输入框/预览/标题栏的场景 */
 function onGlobalKeydown(e: KeyboardEvent) {
   if (!editor.open) return;
+  // Esc 关闭自绘查找卡（兜底：焦点不在 CM 内容区/卡内输入框时）
+  if (e.key === "Escape" && search.open) {
+    e.preventDefault();
+    e.stopPropagation();
+    search.close();
+    return;
+  }
   if (!e.ctrlKey && !e.metaKey) return;
   if (e.shiftKey || e.altKey) return;
   const key = e.key.toLowerCase();
