@@ -27,6 +27,19 @@ tauri-plugin-dialog = "2"
 base64 = "0.22"
 # 系统剪贴板文件列表（CF_HDROP，跨端 Ctrl+C/V 文件传递）
 clipboard-win = "5"
+# OLE 虚拟文件剪贴板（IDataObject + FILEDESCRIPTOR/FILECONTENTS，粘贴时才下载）
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+# windows::core（implement 宏展开引用 windows_core 路径，需直接依赖）
+windows-core = "0.62"
 # 纯 Rust 实现的 SSH 协议栈，无 OpenSSL 依赖，天然跨平台
 russh = "0.64"
 russh-sftp = "3"
