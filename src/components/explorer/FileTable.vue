@@ -399,7 +399,7 @@ function onContainerPointerDown(e: PointerEvent) {
     <div
       class="sticky top-0 z-10 grid items-center border-b pl-6 text-xs text-dim"
       :style="{ height: '40px', borderColor: 'var(--line)', background: 'var(--panel-solid)', gridTemplateColumns: gridTemplate }"
-      @contextmenu.prevent="onHeaderContextMenu"
+      @contextmenu.stop.prevent="onHeaderContextMenu"
     >
       <button
         v-for="col in visibleColumns"

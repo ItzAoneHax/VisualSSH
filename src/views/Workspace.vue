@@ -1044,7 +1044,8 @@ function onKeydown(e: KeyboardEvent) {
           </div>
 
           <div
-            class="flex h-[34px] shrink-0 items-center overflow-visible rounded-[4px]"
+            class="flex h-[34px] shrink-0 items-center rounded-[4px]"
+            :class="searchOpen ? 'overflow-visible' : 'overflow-hidden'"
             :style="{
               width: searchOpen ? '250px' : '0px',
               padding: searchOpen ? '0px 10px' : '0px',
