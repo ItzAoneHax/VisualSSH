@@ -37,6 +37,10 @@ const size = ref({
 });
 const dragging = ref(false);
 const confirmClose = ref(false);
+/** resize 锁定的左上角位置（相对遮罩的 absolute 坐标；null = flex 居中常态）。
+ *  flex 居中下宽度 +d 会让右缘仅右移 d/2（左缘同时左移 d/2），右下角句柄只走一半——
+ *  resize 期间切换为左上角锚定的绝对定位，宽度增量全额作用于右缘，句柄精确跟手 */
+const pos = ref<{ x: number; y: number } | null>(null);
 
 /** 语言/只读按需重配 */
 const languageComp = new Compartment();
@@ -211,10 +215,11 @@ function destroyEditor() {
 
 onBeforeUnmount(destroyEditor);
 
-// 抽屉关闭 → 销毁编辑器；重新打开 → 重建
+// 抽屉关闭 → 销毁编辑器；重新打开 → 重建（位置复位为居中）
 watch(
   () => editor.open,
   (open) => {
+    pos.value = null;
     if (open && !editor.unsupported) {
       void mountEditor();
     } else {
@@ -273,10 +278,17 @@ watch(
   },
 );
 
-/** 右下角拖拽调整窗体大小（宽 480–92vw / 高 280–90vh） */
+/** 右下角拖拽调整窗体大小（宽 480–92vw / 高 280–90vh）；
+ *  拖拽开始即锁定左上角（absolute 定位），拖多少走多少 */
 function onResizeDown(e: PointerEvent) {
   if (editor.maximized) return;
   dragging.value = true;
+  const win = (e.currentTarget as HTMLElement).closest('[role="dialog"]');
+  if (win) {
+    const rect = win.getBoundingClientRect();
+    // 遮罩 fixed inset-0 top-9：absolute 子元素相对其 padding box（视口顶部下移 36px）
+    pos.value = { x: rect.left, y: rect.top - 36 };
+  }
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   const startX = e.clientX;
   const startY = e.clientY;
@@ -333,7 +345,9 @@ function discardAndClose() {
             width: editor.maximized ? 'auto' : `${size.w}px`,
             height: editor.maximized ? 'auto' : `${size.h}px`,
             inset: editor.maximized ? '20px' : undefined,
-            position: editor.maximized ? 'absolute' : undefined,
+            position: editor.maximized || pos ? 'absolute' : undefined,
+            left: !editor.maximized && pos ? `${pos.x}px` : undefined,
+            top: !editor.maximized && pos ? `${pos.y}px` : undefined,
             transition: dragging ? 'none' : 'width 0.15s ease, height 0.15s ease',
             background: 'color-mix(in srgb, var(--surface-solid) 84%, transparent)',
             backdropFilter: 'blur(20px) saturate(1.15)',
