@@ -39,10 +39,9 @@ async function callWindow(action: "minimize" | "toggleMaximize" | "close") {
 </script>
 
 <template>
-  <!-- 自绘标题栏：跟随应用主题；拖拽区双击可最大化/还原 -->
+  <!-- 自绘标题栏：跟随应用主题（透明底，透出 body 的应用背景色 tint）；拖拽区双击可最大化/还原 -->
   <div
     class="flex h-9 shrink-0 items-stretch justify-between select-none"
-    :style="{ background: 'var(--bg)' }"
   >
     <div
       class="flex min-w-0 flex-1 items-center gap-2 pl-3"

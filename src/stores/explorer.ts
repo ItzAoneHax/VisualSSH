@@ -224,10 +224,10 @@ export const useExplorerStore = defineStore("explorer", () => {
     error.value = null;
     selectedNames.value = new Set();
     anchorName = null;
-    // 连接初始态应用设置默认值（排序/隐藏项显隐）
+    // 连接初始态应用设置默认值（排序/方向/隐藏项显隐）
     showHidden.value = useSettingsStore().settings.showHidden;
     sortKey.value = useSettingsStore().settings.defaultSortKey;
-    sortAsc.value = useSettingsStore().settings.defaultSortKey !== "mtime";
+    sortAsc.value = !useSettingsStore().settings.defaultSortDesc;
     history.value = [];
     historyIndex.value = -1;
     viaHistory = false;
@@ -250,8 +250,15 @@ export const useExplorerStore = defineStore("explorer", () => {
   const visibleEntries = computed(() => {
     const key = sortKey.value;
     const asc = sortAsc.value ? 1 : -1;
-    const dirFirst = (a: FileEntry, b: FileEntry) =>
-      (a.kind === "dir" ? 0 : 1) - (b.kind === "dir" ? 0 : 1);
+    // 排序优先级（Files SortPriority）：文件夹优先 / 文件优先 / 混合
+    const dirOrder = (e: FileEntry) => (e.kind === "dir" ? 0 : 1);
+    const priority = useSettingsStore().settings.sortPriority;
+    const prio =
+      priority === "mixed"
+        ? 0
+        : priority === "folders"
+          ? 1
+          : -1;
 
     const compare: Record<SortKey, (a: FileEntry, b: FileEntry) => number> = {
       name: (a, b) =>
@@ -267,7 +274,7 @@ export const useExplorerStore = defineStore("explorer", () => {
       .filter((e) => showHidden.value || !e.name.startsWith("."))
       .filter((e) => !q || e.name.toLowerCase().includes(q))
       .slice()
-      .sort((a, b) => dirFirst(a, b) || asc * compare[key](a, b));
+      .sort((a, b) => prio * (dirOrder(a) - dirOrder(b)) || asc * compare[key](a, b));
   });
 
   // 目录内容变化后剔除已不存在的选择项（保持其余选择）
@@ -284,8 +291,8 @@ export const useExplorerStore = defineStore("explorer", () => {
       sortAsc.value = !sortAsc.value;
     } else {
       sortKey.value = key;
-      // 修改时间默认最新在前，其余列默认升序
-      sortAsc.value = key !== "mtime";
+      // 换列默认升序（方向由设置「降序排序」决定初始态，列头点击不再有列特例）
+      sortAsc.value = true;
     }
   }
 

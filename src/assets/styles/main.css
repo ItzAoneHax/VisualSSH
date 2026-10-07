@@ -46,7 +46,14 @@
   --folder: #e8a93d;
 
   --row-hover: #00000009;
-  --row-active: #0070cb2e;
+  /* 选中 = SubtleFillColorSecondary（与悬浮同灰，靠左缘 accent 竖条区分）；
+     选中+悬浮 = SubtleFillColorTertiary 再浅一档（ListViewItem_themeresources.xaml） */
+  --row-active: #00000009;
+  --row-active-hover: #00000006;
+
+  /* WinUI Slider 专色（Slider_themeresources.xaml / Common_themeresources_any.xaml） */
+  --slider-thumb-outer: #ffffff; /* ControlSolidFillColorDefault */
+  --slider-track-rest: #00000072; /* ControlStrongFillColorDefault */
 
   /* CodeMirror 语法高亮（近似 VS 亮色 code 主题） */
   --cm-keyword: #0000c0;
@@ -89,7 +96,11 @@
   --folder: #edbb52;
 
   --row-hover: #ffffff0f;
-  --row-active: #50c0ff2e;
+  --row-active: #ffffff0f;
+  --row-active-hover: #ffffff0a;
+
+  --slider-thumb-outer: #454545;
+  --slider-track-rest: #ffffff8b;
 
   /* CodeMirror 语法高亮（近似 VS Dark） */
   --cm-keyword: #569cd6;
@@ -122,6 +133,7 @@
   --color-folder: var(--folder);
   --color-row-hover: var(--row-hover);
   --color-row-active: var(--row-active);
+  --color-row-active-hover: var(--row-active-hover);
 
   /* Files 使用 Segoe UI Variable（非 Windows 平台回退系统 UI 字体） */
   --font-display: "Segoe UI Variable Text", "Segoe UI", -apple-system,
@@ -137,10 +149,15 @@ body,
   height: 100%;
 }
 
-/* WinUI 类型阶梯基准：Body 14 */
+/* WinUI 类型阶梯基准：Body 14。
+   应用背景色（Files App.Theme.BackgroundBrush）：半透明 tint 层叠在窗口底色上，
+   半透明卡片（toolbar/panel/sidebar）会自然透出 —— 与 Files 的 Layer 体系一致。 */
 body {
-  @apply bg-bg font-display text-ink antialiased;
+  @apply font-display text-ink antialiased;
   font-size: 14px;
+  background:
+    linear-gradient(var(--app-bg-tint, transparent), var(--app-bg-tint, transparent)),
+    var(--bg);
 }
 
 * {
@@ -260,6 +277,56 @@ body {
     min-height: 64px;
     background: var(--fill-control);
     border: 1px solid var(--line);
+  }
+
+  /* 设置页分节标题（Files FoldersPage 的 Display/Behaviors：16px Medium） */
+  .settings-group-title {
+    @apply pt-4 pb-1 text-base font-medium;
+  }
+
+  /* 折叠组（wct SettingsExpander）：外层同 settings-card，头部可点折叠，
+     子项在卡内以分隔线分行 */
+  .settings-expander {
+    @apply overflow-hidden rounded-lg;
+    background: var(--fill-control);
+    border: 1px solid var(--line);
+  }
+  .settings-expander-header {
+    @apply flex min-h-16 w-full items-center gap-3.5 rounded-lg px-4 py-3 text-left transition-colors;
+  }
+  .settings-expander-header:hover {
+    background: var(--fill-subtle);
+  }
+  .settings-expander-chevron {
+    transition: rotate 0.2s ease;
+  }
+  .settings-expander.open .settings-expander-chevron {
+    rotate: 180deg;
+  }
+  .settings-expander-items {
+    @apply border-t;
+    border-color: var(--line);
+  }
+  .settings-expander-item {
+    @apply flex min-h-14 items-center gap-3.5 px-4 py-2.5 transition-colors;
+  }
+  .settings-expander-item:hover {
+    background: var(--fill-subtle);
+  }
+
+  /* 透明度棋盘格（ColorPicker 预览 / 色块按钮的透底指示） */
+  .alpha-checker {
+    background-image:
+      linear-gradient(45deg, var(--line) 25%, transparent 25%),
+      linear-gradient(-45deg, var(--line) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, var(--line) 75%),
+      linear-gradient(-45deg, transparent 75%, var(--line) 75%);
+    background-size: 8px 8px;
+    background-position:
+      0 0,
+      0 4px,
+      4px -4px,
+      -4px 0px;
   }
 
   /* WinUI ToggleSwitch：44×24 轨道 + 16px 滑块 */

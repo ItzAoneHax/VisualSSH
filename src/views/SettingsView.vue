@@ -1,41 +1,34 @@
 <script setup lang="ts">
-import {
-  ArrowDownUp,
-  ArrowLeft,
-  ChevronDown,
-  Code,
-  Eye,
-  Info,
-  Palette,
-  ShieldCheck,
-  SlidersHorizontal,
-  SquareTerminal,
-  Trash2,
-} from "@lucide/vue";
-import { invoke } from "@tauri-apps/api/core";
-import { computed, onMounted, ref } from "vue";
+import { ArrowLeft, Info, Palette, ShieldCheck, SlidersHorizontal } from "@lucide/vue";
+import { ref, type Component } from "vue";
 
-import DropdownMenu, { type MenuItem } from "@/components/common/DropdownMenu.vue";
-import { useExplorerStore, SORT_KEYS, type SortKey } from "@/stores/explorer";
-import { useSettingsStore, type ThemeMode } from "@/stores/settings";
+import AboutSection from "@/components/settings/AboutSection.vue";
+import AppearanceSection from "@/components/settings/AppearanceSection.vue";
+import PreferencesSection from "@/components/settings/PreferencesSection.vue";
+import SecuritySection from "@/components/settings/SecuritySection.vue";
+import { useSettingsStore } from "@/stores/settings";
 
 /**
- * 设置页 —— 布局与卡片仿 files-community/Files（SidebarView 240px 导航 +
- * SettingsCard：图标/标题/说明/右侧控件）。设置取代了右上角的主题切换与
- * 「隐藏点开头的项目」菜单项，全部持久化于 localStorage。
+ * 设置页 —— 布局仿 files-community/Files（SidebarView 240px 导航 +
+ * SettingsCard 卡片），各分区拆分为独立组件（外观/首选项/SSH 安全/关于）。
  */
-
 const settings = useSettingsStore();
-const explorer = useExplorerStore();
 
 type Section = "appearance" | "preferences" | "security" | "about";
 
-const sections: { key: Section; label: string; icon: typeof Palette }[] = [
+const sections: { key: Section; label: string; icon: Component }[] = [
   { key: "appearance", label: "外观", icon: Palette },
   { key: "preferences", label: "首选项", icon: SlidersHorizontal },
   { key: "security", label: "SSH 安全", icon: ShieldCheck },
   { key: "about", label: "关于", icon: Info },
 ];
+
+const sectionViews: Record<Section, Component> = {
+  appearance: AppearanceSection,
+  preferences: PreferencesSection,
+  security: SecuritySection,
+  about: AboutSection,
+};
 
 const section = ref<Section>("appearance");
 
@@ -45,90 +38,6 @@ const sectionTitles: Record<Section, string> = {
   security: "SSH 安全",
   about: "关于",
 };
-
-const THEME_MODES: { key: ThemeMode; label: string }[] = [
-  { key: "system", label: "跟随系统" },
-  { key: "light", label: "浅色" },
-  { key: "dark", label: "深色" },
-];
-
-const SORT_OPTIONS: { key: SortKey; label: string }[] = SORT_KEYS.map((key) => ({
-  key,
-  label: { name: "名称", mtime: "修改时间", kind: "类型", size: "大小", permissions: "权限" }[key],
-}));
-
-/** 默认排序列下拉（Files 同款 ComboBox 语义） */
-const sortMenuOpen = ref(false);
-const currentSortLabel = computed(
-  () => SORT_OPTIONS.find((o) => o.key === settings.settings.defaultSortKey)?.label ?? "名称",
-);
-const sortMenuItems = computed<MenuItem[]>(() =>
-  SORT_OPTIONS.map((o) => ({
-    key: o.key,
-    label: o.label,
-    checked: o.key === settings.settings.defaultSortKey,
-  })),
-);
-
-function onSortSelect(key: string) {
-  sortMenuOpen.value = false;
-  setDefaultSort(key as SortKey);
-}
-
-/** —— 控件们 —— */
-
-function setTheme(mode: ThemeMode) {
-  settings.update({ theme: mode });
-}
-
-/** 显示隐藏项：立即作用于当前浏览 */
-function setShowHidden(value: boolean) {
-  settings.update({ showHidden: value });
-  explorer.showHidden = value;
-}
-
-function setDefaultSort(key: SortKey) {
-  settings.update({ defaultSortKey: key });
-}
-
-function stepFontSize(which: "editorFontSize" | "terminalFontSize", delta: number) {
-  const min = which === "editorFontSize" ? 11 : 10;
-  const max = 20;
-  const next = Math.min(max, Math.max(min, settings.settings[which] + delta));
-  settings.update({ [which]: next });
-}
-
-/** —— known_hosts 管理 —— */
-
-interface KnownHostRow {
-  host: string;
-  port: number;
-  algorithm: string;
-  fingerprint: string;
-}
-
-const knownHosts = ref<KnownHostRow[] | null>(null);
-
-async function loadKnownHosts() {
-  try {
-    knownHosts.value = await invoke<KnownHostRow[]>("ssh_known_hosts_list");
-  } catch {
-    knownHosts.value = [];
-  }
-}
-
-async function removeKnownHost(row: KnownHostRow) {
-  try {
-    await invoke("ssh_known_hosts_remove", { host: row.host, port: row.port });
-  } catch {
-    // 删除失败保留原列表
-  }
-  await loadKnownHosts();
-}
-
-onMounted(() => {
-  void loadKnownHosts();
-});
 </script>
 
 <template>
@@ -176,196 +85,8 @@ onMounted(() => {
         class="min-h-0 flex-1 overflow-y-auto rounded-lg"
         :style="{ background: 'var(--panel)', border: '1px solid var(--line)' }"
       >
-        <div class="mx-auto max-w-2xl px-6 py-5">
-          <!-- ============ 外观 ============ -->
-          <template v-if="section === 'appearance'">
-            <h2 class="text-xl font-semibold">外观</h2>
-            <p class="mt-1 mb-4 text-xs text-dim">配置应用的视觉表现。</p>
-
-            <div class="flex flex-col gap-1">
-              <!-- 应用主题 -->
-              <div class="settings-card">
-                <Palette :size="20" class="shrink-0 text-dim" />
-                <div class="min-w-0 flex-1">
-                  <p class="text-sm font-medium">应用主题</p>
-                  <p class="mt-0.5 text-xs text-dim">选择应用的外观主题。</p>
-                </div>
-                <div class="flex shrink-0 rounded-md p-0.5" :style="{ background: 'var(--fill-subtle)', border: '1px solid var(--line)' }">
-                  <button
-                    v-for="mode in THEME_MODES"
-                    :key="mode.key"
-                    type="button"
-                    class="rounded-[4px] px-2.5 py-1 text-xs font-medium transition-colors"
-                    :class="settings.settings.theme === mode.key ? 'text-ink' : 'text-dim hover:text-ink'"
-                    :style="settings.settings.theme === mode.key ? { background: 'var(--surface-solid)', boxShadow: '0 1px 2px rgba(0,0,0,0.16)' } : undefined"
-                    @click="setTheme(mode.key)"
-                  >
-                    {{ mode.label }}
-                  </button>
-                </div>
-              </div>
-
-              <!-- 编辑器字号 -->
-              <div class="settings-card">
-                <Code :size="20" class="shrink-0 text-dim" />
-                <div class="min-w-0 flex-1">
-                  <p class="text-sm font-medium">编辑器字号</p>
-                  <p class="mt-0.5 text-xs text-dim">内置编辑器正文字号。</p>
-                </div>
-                <div class="flex shrink-0 items-center gap-1">
-                  <button type="button" class="btn-icon h-7 w-7" aria-label="减小字号" :disabled="settings.settings.editorFontSize <= 11" @click="stepFontSize('editorFontSize', -1)">
-                    −
-                  </button>
-                  <span class="w-10 text-center font-mono text-sm tabular-nums">{{ settings.settings.editorFontSize }} px</span>
-                  <button type="button" class="btn-icon h-7 w-7" aria-label="增大字号" :disabled="settings.settings.editorFontSize >= 20" @click="stepFontSize('editorFontSize', 1)">
-                    +
-                  </button>
-                </div>
-              </div>
-
-              <!-- 终端字号 -->
-              <div class="settings-card">
-                <SquareTerminal :size="20" class="shrink-0 text-dim" />
-                <div class="min-w-0 flex-1">
-                  <p class="text-sm font-medium">终端字号</p>
-                  <p class="mt-0.5 text-xs text-dim">内置终端的等宽字号。</p>
-                </div>
-                <div class="flex shrink-0 items-center gap-1">
-                  <button type="button" class="btn-icon h-7 w-7" aria-label="减小字号" :disabled="settings.settings.terminalFontSize <= 10" @click="stepFontSize('terminalFontSize', -1)">
-                    −
-                  </button>
-                  <span class="w-10 text-center font-mono text-sm tabular-nums">{{ settings.settings.terminalFontSize }} px</span>
-                  <button type="button" class="btn-icon h-7 w-7" aria-label="增大字号" :disabled="settings.settings.terminalFontSize >= 20" @click="stepFontSize('terminalFontSize', 1)">
-                    +
-                  </button>
-                </div>
-              </div>
-            </div>
-          </template>
-
-          <!-- ============ 首选项 ============ -->
-          <template v-else-if="section === 'preferences'">
-            <h2 class="text-xl font-semibold">首选项</h2>
-            <p class="mt-1 mb-4 text-xs text-dim">配置文件浏览的行为。</p>
-
-            <div class="flex flex-col gap-1">
-              <!-- 显示隐藏项目 -->
-              <div class="settings-card">
-                <Eye :size="20" class="shrink-0 text-dim" />
-                <div class="min-w-0 flex-1">
-                  <p class="text-sm font-medium">显示隐藏项目</p>
-                  <p class="mt-0.5 text-xs text-dim">显示以点（.）开头的文件与文件夹。</p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  :aria-checked="settings.settings.showHidden"
-                  class="toggle-switch"
-                  :class="settings.settings.showHidden && 'on'"
-                  @click="setShowHidden(!settings.settings.showHidden)"
-                >
-                  <span class="toggle-knob" />
-                </button>
-              </div>
-
-              <!-- 默认排序列（Files 用 ComboBox：按钮 + 下拉单选） -->
-              <div class="settings-card">
-                <ArrowDownUp :size="20" class="shrink-0 text-dim" />
-                <div class="min-w-0 flex-1">
-                  <p class="text-sm font-medium">默认排序列</p>
-                  <p class="mt-0.5 text-xs text-dim">连接服务器时文件列表的初始排序（下次连接生效）。</p>
-                </div>
-                <div class="relative shrink-0">
-                  <button
-                    type="button"
-                    class="flex h-8 items-center gap-2 rounded-[4px] px-3 text-sm transition-colors hover:brightness-[0.98]"
-                    :style="{ background: 'var(--fill-control)', border: '1px solid var(--line-strong)' }"
-                    :aria-label="`默认排序列，当前 ${currentSortLabel}`"
-                    @click="sortMenuOpen = !sortMenuOpen"
-                  >
-                    <span>{{ currentSortLabel }}</span>
-                    <ChevronDown :size="14" class="text-dim" :class="sortMenuOpen && 'rotate-180'" />
-                  </button>
-                  <DropdownMenu
-                    :open="sortMenuOpen"
-                    :items="sortMenuItems"
-                    @select="onSortSelect"
-                    @close="sortMenuOpen = false"
-                  />
-                </div>
-              </div>
-            </div>
-          </template>
-
-          <!-- ============ SSH 安全 ============ -->
-          <template v-else-if="section === 'security'">
-            <h2 class="text-xl font-semibold">SSH 安全</h2>
-            <p class="mt-1 mb-4 text-xs text-dim">
-              管理已信任的主机公钥指纹（TOFU）。删除后再次连接将重新触发首次信任确认。
-            </p>
-
-            <div v-if="!knownHosts?.length" class="py-10 text-center text-xs text-dim">
-              暂无已信任主机
-            </div>
-
-            <div v-else class="flex flex-col gap-1">
-              <div
-                v-for="row in knownHosts"
-                :key="`${row.host}:${row.port}`"
-                class="settings-card"
-              >
-                <ShieldCheck :size="20" class="shrink-0 text-live" />
-                <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm font-medium">
-                    <span class="font-mono">{{ row.host }}</span>:{{ row.port }}
-                  </p>
-                  <p class="mt-0.5 truncate font-mono text-xs text-dim" :title="`${row.algorithm} · ${row.fingerprint}`">
-                    {{ row.algorithm }} · {{ row.fingerprint }}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  class="btn-icon h-8 w-8 shrink-0"
-                  title="删除信任记录"
-                  :aria-label="`删除 ${row.host} 的信任记录`"
-                  @click="removeKnownHost(row)"
-                >
-                  <Trash2 :size="15" />
-                </button>
-              </div>
-            </div>
-          </template>
-
-          <!-- ============ 关于 ============ -->
-          <template v-else>
-            <h2 class="text-xl font-semibold">关于</h2>
-            <p class="mt-1 mb-4 text-xs text-dim">关于本应用。</p>
-
-            <div class="flex flex-col gap-1">
-              <div class="settings-card">
-                <Info :size="20" class="shrink-0 text-dim" />
-                <div class="min-w-0 flex-1">
-                  <p class="text-sm font-medium">VisualSSH</p>
-                  <p class="mt-0.5 text-xs text-dim">远程文件，本地体验。</p>
-                </div>
-                <span class="shrink-0 font-mono text-xs text-dim">0.1.0</span>
-              </div>
-              <div class="settings-card">
-                <ShieldCheck :size="20" class="shrink-0 text-dim" />
-                <div class="min-w-0 flex-1">
-                  <p class="text-sm font-medium">开源许可</p>
-                  <p class="mt-0.5 text-xs text-dim">MIT License。</p>
-                </div>
-              </div>
-              <div class="settings-card">
-                <Code :size="20" class="shrink-0 text-dim" />
-                <div class="min-w-0 flex-1">
-                  <p class="text-sm font-medium">技术栈</p>
-                  <p class="mt-0.5 text-xs text-dim">Tauri 2 · Vue 3 · Tailwind 4 · russh / russh-sftp · CodeMirror 6 · xterm.js</p>
-                </div>
-              </div>
-            </div>
-          </template>
+        <div class="mx-auto max-w-3xl px-6 py-5">
+          <component :is="sectionViews[section]" />
         </div>
       </div>
     </div>

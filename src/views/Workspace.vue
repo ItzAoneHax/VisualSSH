@@ -89,7 +89,8 @@ function closeSearch() {
   explorer.searchQuery = "";
 }
 
-/** Ctrl+C：多选文件静默下载到暂存目录，全部完成后写入系统剪贴板（HDROP） */
+/** Ctrl+C：选中远端文件写入 OLE 虚拟文件剪贴板（FileZilla 式）——
+ *  复制瞬间零下载零传输条目；本地资源管理器粘贴时才经 IStream 流式拉取 */
 async function copySelectionToClipboard() {
   const connectionId = connections.active?.connectionId;
   if (!connectionId || explorer.selectedNames.size === 0) return;
@@ -170,24 +171,36 @@ const ctxMenu = ref<{ open: boolean; x: number; y: number; entry: FileEntry | nu
 const deleteTargets = ref<FileEntry[] | null>(null);
 const chmodTarget = ref<FileEntry | null>(null);
 
-/** 单条删除（右键菜单）或按当前多选批量（Delete 键） */
+/** 单条删除（右键菜单）或按当前多选批量（Delete 键）。
+ *  设置关闭「删除前确认」时跳过对话框直接执行（Files ShowConfirmationWhenDeletingItems）。 */
 function requestDelete(entry: FileEntry | null) {
+  if (collectDeleteTargets(entry)) {
+    if (settings.settings.confirmDelete) return; // 弹确认框
+    confirmDelete();
+  }
+}
+
+function collectDeleteTargets(entry: FileEntry | null): boolean {
   if (entry && explorer.isSelected(entry.name) && explorer.selectedNames.size > 1) {
     // 右键项在多选集合内：批量删整个集合
     deleteTargets.value = [...explorer.selectedNames]
       .map((n) => explorer.entryByName(n))
       .filter((e): e is FileEntry => !!e);
-    return;
+    return true;
   }
   if (entry) {
     deleteTargets.value = [entry];
-    return;
+    return true;
   }
   // 无参调用 = Delete 键作用于当前选择
   const targets = [...explorer.selectedNames]
     .map((n) => explorer.entryByName(n))
     .filter((e): e is FileEntry => !!e);
-  if (targets.length) deleteTargets.value = targets;
+  if (targets.length) {
+    deleteTargets.value = targets;
+    return true;
+  }
+  return false;
 }
 
 function confirmDelete() {
@@ -453,23 +466,27 @@ function onKeydown(e: KeyboardEvent) {
           <RefreshCw :size="15" :class="explorer.loading && 'animate-spin'" />
         </button>
 
-        <!-- 面包屑 ⇄ 搜索框：面包屑左对齐固定、从右缘被裁剪让位；搜索框自右缘展开 -->
+        <!-- 面包屑 ⇄ 搜索框：面包屑左对齐固定、从右缘被裁剪让位；搜索框自身宽度动画
+             （flex 末项右缘固定、左缘向左扫出，四条边框全程绘制，内容定宽防回流） -->
         <div class="mx-1.5 flex min-w-0 flex-1 items-center gap-1.5">
           <div class="min-w-0 flex-1 overflow-hidden">
             <Breadcrumbs />
           </div>
 
           <div
-            class="shrink-0 overflow-hidden"
+            class="flex h-[34px] shrink-0 items-center overflow-hidden rounded-[4px]"
             :style="{
               width: searchOpen ? '250px' : '0px',
-              transition: 'width 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+              padding: searchOpen ? '0px 10px' : '0px',
+              borderWidth: searchOpen ? '1px' : '0px',
+              borderStyle: 'solid',
+              borderColor: 'var(--line)',
+              background: 'var(--sidebar)',
+              transition:
+                'width 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-width 0.1s linear, padding 0.1s linear',
             }"
           >
-            <div
-              class="flex h-[34px] w-[250px] items-center gap-1.5 rounded-[4px] px-2.5"
-              :style="{ background: 'var(--sidebar)', border: '1px solid var(--line)' }"
-            >
+            <div class="flex h-full w-[228px] shrink-0 items-center gap-1.5">
               <Search :size="14" class="shrink-0 text-dim" />
               <input
                 v-model="explorer.searchQuery"
@@ -581,8 +598,9 @@ function onKeydown(e: KeyboardEvent) {
       </div>
     </div>
 
-    <!-- 通栏状态栏：项目统计 + 连接状态（全宽一条，底部唯一收边） -->
+    <!-- 通栏状态栏：项目统计 + 连接状态（全宽一条，底部唯一收边；可在设置中隐藏） -->
     <footer
+      v-if="settings.settings.showStatusBar"
       class="flex h-8 shrink-0 items-center justify-between border-t px-3 text-xs text-dim"
       :style="{ borderColor: 'var(--line)' }"
     >

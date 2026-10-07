@@ -6,14 +6,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VisualSSH</title>
     <script>
-      // 首帧前应用主题，避免暗色模式闪白
+      // 首帧前应用主题与应用背景色，避免暗色模式闪白 / 背景色闪烁
       try {
         var theme = localStorage.getItem("visualssh:theme") || "dark";
+        var settings = null;
+        try {
+          settings = JSON.parse(
+            localStorage.getItem("visualssh:settings:v1") || "null",
+          );
+        } catch (e) {}
         var dark =
           theme === "dark" ||
           (theme === "system" &&
             window.matchMedia("(prefers-color-scheme: dark)").matches);
         if (dark) document.documentElement.classList.add("dark");
+        if (settings && typeof settings.bgColor === "string") {
+          document.documentElement.style.setProperty(
+            "--app-bg-tint",
+            settings.bgColor,
+          );
+        }
       } catch (e) {}
     </script>
   </head>

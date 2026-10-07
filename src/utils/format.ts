@@ -2,13 +2,21 @@ import type { FileEntry } from "@/types";
 
 const SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"] as const;
 
+/** 大小进制（设置页「大小格式」：二进制 1024 / 十进制 1000），由 settings store 同步 */
+let sizeUnit: "binary" | "decimal" = "binary";
+
+export function configureSizeUnit(unit: "binary" | "decimal") {
+  sizeUnit = unit;
+}
+
 export function formatSize(bytes: number): string {
   if (bytes <= 0) return "0 B";
+  const base = sizeUnit === "binary" ? 1024 : 1000;
   const i = Math.min(
-    Math.floor(Math.log(bytes) / Math.log(1024)),
+    Math.floor(Math.log(bytes) / Math.log(base)),
     SIZE_UNITS.length - 1,
   );
-  const value = bytes / 1024 ** i;
+  const value = bytes / base ** i;
   // 目录与空文件会走到这里，保持紧凑
   return `${value >= 100 ? value.toFixed(0) : value.toFixed(1)} ${SIZE_UNITS[i]}`;
 }

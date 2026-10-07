@@ -3,10 +3,18 @@ import { ChevronDown, ChevronUp, File, Folder, Link2, SearchX } from "@lucide/vu
 import { ref, watch } from "vue";
 
 import { useExplorerStore, type SortKey } from "@/stores/explorer";
+import { useSettingsStore } from "@/stores/settings";
 import type { FileEntry } from "@/types";
 import { formatMtime, formatSize, kindLabel } from "@/utils/format";
 
 const explorer = useExplorerStore();
+const settings = useSettingsStore();
+
+/** 单击打开（Files SingleClickToOpen）：无修饰键单击直接进入/打开 */
+function openEntry(entry: FileEntry) {
+  if (entry.kind === "dir") explorer.enter(entry.name);
+  else emit("openFile", entry);
+}
 
 const emit = defineEmits<{
   contextMenu: [payload: { entry: FileEntry | null; x: number; y: number }];
@@ -83,20 +91,31 @@ function iconClass(entry: FileEntry): string {
   }
 }
 
-/** Windows 资源管理器语义：单击单选 / Ctrl+单击反选 / Shift+单击范围 */
+/** Windows 资源管理器语义：单击单选 / Ctrl+单击反选 / Shift+单击范围；
+ *  开启「单击打开」后，无修饰键单击 = 打开 */
 function onRowClick(entry: FileEntry, e: MouseEvent) {
   if (e.ctrlKey) {
     explorer.toggleSelect(entry.name);
   } else if (e.shiftKey) {
     explorer.selectRange(entry.name);
+  } else if (settings.settings.singleClickOpen) {
+    openEntry(entry);
   } else {
     explorer.selectOnly(entry.name);
   }
 }
 
 function onRowDblClick(entry: FileEntry) {
-  if (entry.kind === "dir") explorer.enter(entry.name);
-  else emit("openFile", entry);
+  // 单击打开模式下双击不重复触发（click 已打开，目录此时已切换）
+  if (settings.settings.singleClickOpen) return;
+  openEntry(entry);
+}
+
+/** 双击空白处转到上一级（Files DoubleClickBlankSpaceToGoUp） */
+function onBlankDblClick(e: MouseEvent) {
+  if (!settings.settings.dblClickBlankGoUp) return;
+  if ((e.target as HTMLElement).closest("[data-row], button, input")) return;
+  explorer.up();
 }
 
 /** 右键未选中项时先单选（资源管理器行为）；已选中则保持多选 */
@@ -109,10 +128,28 @@ function onBlankContextMenu(e: MouseEvent) {
   emit("contextMenu", { entry: null, x: e.clientX, y: e.clientY });
 }
 
-/** —— 橡皮筋框选：空白处按下拖动画框，与行矩形相交即选中 —— */
+/** —— 橡皮筋框选：空白处按下拖动画框，拖动过程中相交行实时选中 —— */
 const rubber = ref<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
 /** 框选进行中禁文本选择 */
 const rubberActive = ref(false);
+
+/** 命中测试：与选框相交的行名（Explorer 语义） */
+function hitTest(x1: number, y1: number, x2: number, y2: number): string[] {
+  const box = {
+    left: Math.min(x1, x2),
+    right: Math.max(x1, x2),
+    top: Math.min(y1, y2),
+    bottom: Math.max(y1, y2),
+  };
+  const hits: string[] = [];
+  for (const el of document.querySelectorAll("[data-row]")) {
+    const r = el.getBoundingClientRect();
+    const intersect =
+      r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top;
+    if (intersect) hits.push((el as HTMLElement).dataset.row!);
+  }
+  return hits;
+}
 
 function onContainerPointerDown(e: PointerEvent) {
   if (e.button !== 0) return;
@@ -122,32 +159,33 @@ function onContainerPointerDown(e: PointerEvent) {
   const startY = e.clientY;
   const additive = e.ctrlKey;
   let moved = false;
+  let raf = 0;
 
   const onMove = (ev: PointerEvent) => {
     if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 4) {
       moved = true;
       rubberActive.value = true;
       rubber.value = { x1: startX, y1: startY, x2: ev.clientX, y2: ev.clientY };
+      // 实时选中：rAF 节流命中测试，状态栏随拖动即时计数
+      if (!raf) {
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          if (rubber.value) {
+            explorer.applyRubberSelection(
+              hitTest(startX, startY, rubber.value.x2, rubber.value.y2),
+              additive,
+            );
+          }
+        });
+      }
     }
   };
   const onUp = (ev: PointerEvent) => {
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
+    if (raf) cancelAnimationFrame(raf);
     if (moved) {
-      const box = {
-        left: Math.min(startX, ev.clientX),
-        right: Math.max(startX, ev.clientX),
-        top: Math.min(startY, ev.clientY),
-        bottom: Math.max(startY, ev.clientY),
-      };
-      const hits: string[] = [];
-      for (const el of document.querySelectorAll("[data-row]")) {
-        const r = el.getBoundingClientRect();
-        const intersect =
-          r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top;
-        if (intersect) hits.push((el as HTMLElement).dataset.row!);
-      }
-      explorer.applyRubberSelection(hits, additive);
+      explorer.applyRubberSelection(hitTest(startX, startY, ev.clientX, ev.clientY), additive);
     } else {
       // 未拖动 = 空白单击：清除选择
       explorer.clearSelection();
@@ -166,6 +204,7 @@ function onContainerPointerDown(e: PointerEvent) {
     class="relative min-h-full px-2 pb-3"
     :class="rubberActive && 'select-none'"
     @pointerdown="onContainerPointerDown"
+    @dblclick="onBlankDblClick"
     @contextmenu.prevent="onBlankContextMenu($event)"
   >
     <!-- 列头：40 高、左距 24、底部分隔线，点击排序；sticky 钉在文件区顶部 -->
@@ -239,9 +278,13 @@ function onContainerPointerDown(e: PointerEvent) {
         <div
           v-for="entry in explorer.visibleEntries"
           :key="entry.name"
-          class="grid cursor-default grid-cols-[minmax(0,1fr)_10rem_6rem_6rem_7rem] items-center rounded-[4px] px-3 text-sm transition-colors"
+          class="relative grid cursor-default grid-cols-[minmax(0,1fr)_10rem_6rem_6rem_7rem] items-center rounded-[4px] px-3 text-sm transition-colors"
           :style="{ height: '36px' }"
-          :class="explorer.isSelected(entry.name) ? 'bg-row-active' : 'hover:bg-row-hover'"
+          :class="
+            explorer.isSelected(entry.name)
+              ? 'bg-row-active hover:bg-row-active-hover'
+              : 'hover:bg-row-hover'
+          "
           role="row"
           :data-row="entry.name"
           :aria-selected="explorer.isSelected(entry.name)"
@@ -251,6 +294,12 @@ function onContainerPointerDown(e: PointerEvent) {
           @contextmenu.stop.prevent="onRowContextMenu(entry, $event)"
           @keydown.enter="entry.kind === 'dir' && explorer.enter(entry.name)"
         >
+          <!-- 选中指示竖条（WinUI ListViewItemPresenter SelectionIndicator：3×16、1.5 圆角、左缘居中） -->
+          <span
+            v-if="explorer.isSelected(entry.name)"
+            class="pointer-events-none absolute top-1/2 left-0 h-4 w-[3px] -translate-y-1/2 rounded-[1.5px] bg-accent"
+            aria-hidden="true"
+          />
           <!-- 名称列：图标 16 + 文字距 6（DetailsLayoutPage IconColumn） -->
           <span class="flex min-w-0 items-center pl-3">
             <component
