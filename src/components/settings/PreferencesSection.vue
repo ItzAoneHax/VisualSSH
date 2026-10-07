@@ -15,16 +15,18 @@ import { storeToRefs } from "pinia";
 
 import SettingsExpander from "@/components/settings/SettingsExpander.vue";
 import SettingsSelect from "@/components/settings/SettingsSelect.vue";
-import { useExplorerStore, SORT_KEYS, type SortKey } from "@/stores/explorer";
+import { SORT_KEYS, type SortKey } from "@/stores/explorer";
+import { useExplorer } from "@/stores/explorer";
 import { useSettingsStore } from "@/stores/settings";
+import { useWorkspaceStore } from "@/stores/workspace";
 
 /**
  * 首选项分区（仿 Files FoldersPage/LayoutPage 的「显示 / 行为」两节）：
  * 显示 = 隐藏项目、默认排序（列/方向/优先级）、大小格式；
- * 行为 = 删除确认、单击打开、双击空白处上一级。
+ * 行为 = 删除确认、单击打开、双击空白处上一级、编辑器默认模式。
  */
 const settings = useSettingsStore();
-const explorer = useExplorerStore();
+const workspace = useWorkspaceStore();
 // storeToRefs：update() 整体替换 settings.value，直接取 settings.settings 会拿到冻结快照
 const { settings: s } = storeToRefs(settings);
 
@@ -63,10 +65,11 @@ const DELETE_CONFIRM_OPTIONS = [
   { key: "never", label: "不显示确认对话框" },
 ];
 
-/** 显示隐藏项：立即作用于当前浏览 */
+/** 显示隐藏项：立即作用于当前活动窗格（工作区未打开时仅写设置） */
 function setShowHidden(value: boolean) {
   settings.update({ showHidden: value });
-  explorer.showHidden = value;
+  const paneId = workspace.activePaneId;
+  if (paneId) useExplorer(paneId).showHidden = value;
 }
 </script>
 

@@ -4,18 +4,17 @@ import { computed } from "vue";
 
 import TitleBar from "@/components/common/TitleBar.vue";
 import { useConnectionsStore } from "@/stores/connections";
-import { useExplorerStore } from "@/stores/explorer";
 import { useSettingsStore } from "@/stores/settings";
 import ConnectionManager from "@/views/ConnectionManager.vue";
 import SettingsView from "@/views/SettingsView.vue";
 import Workspace from "@/views/Workspace.vue";
 
 const connections = useConnectionsStore();
-const explorer = useExplorerStore();
 const settings = useSettingsStore();
 
 function handleDisconnect() {
-  void connections.disconnect().then(() => explorer.clear());
+  // explorer 实例回收在工作区组件卸载（workspace.resetAll）中完成
+  void connections.disconnect();
 }
 
 /** 背景图片（Files AppThemeBackgroundImage）：垫在窗口最底层，

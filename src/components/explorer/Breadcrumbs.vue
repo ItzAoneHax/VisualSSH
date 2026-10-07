@@ -3,10 +3,13 @@ import { ChevronRight, Folder, HardDrive, LoaderCircle } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 
 import { listDir } from "@/api/ssh";
-import { useExplorerStore } from "@/stores/explorer";
+import { useExplorer } from "@/stores/explorer";
 import { joinPath } from "@/utils/format";
 
-const explorer = useExplorerStore();
+const props = defineProps<{ paneId: string }>();
+
+// 窗格实例（paneId 与组件实例一一对应）
+const explorer = useExplorer(props.paneId);
 
 /** 每段对应的可跳转路径：[ "/", "/var", "/var/log" ... ] */
 const crumbs = computed(() => {

@@ -6,7 +6,7 @@ import ContextMenu from "@/components/common/ContextMenu.vue";
 import type { MenuItem } from "@/components/common/DropdownMenu.vue";
 import { useClipboardStore } from "@/stores/clipboard";
 import {
-  useExplorerStore,
+  useExplorer,
   type SortKey,
   type SearchHitRow,
 } from "@/stores/explorer";
@@ -14,7 +14,10 @@ import { useSettingsStore } from "@/stores/settings";
 import type { FileEntry } from "@/types";
 import { formatMtime, formatSize, kindLabel } from "@/utils/format";
 
-const explorer = useExplorerStore();
+const props = defineProps<{ paneId: string }>();
+
+// 窗格实例（paneId 与组件实例一一对应；非活动标签不渲染 DOM、状态留在 store）
+const explorer = useExplorer(props.paneId);
 const settings = useSettingsStore();
 const clip = useClipboardStore();
 

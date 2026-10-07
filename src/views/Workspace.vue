@@ -57,11 +57,12 @@ import { useConnectionsStore } from "@/stores/connections";
 import { useClipboardStore } from "@/stores/clipboard";
 import { useConflictStore, type IncomingItem } from "@/stores/conflicts";
 import { useEditorStore } from "@/stores/editor";
-import { useExplorerStore } from "@/stores/explorer";
+import { useExplorer } from "@/stores/explorer";
 import { usePinnedStore } from "@/stores/pinned";
 import { useSettingsStore } from "@/stores/settings";
 import { useTerminalStore } from "@/stores/terminal";
 import { useTransferStore } from "@/stores/transfer";
+import { useWorkspaceStore } from "@/stores/workspace";
 import type { FileEntry } from "@/types";
 import { copyText, formatSize, joinPath, pathBaseName } from "@/utils/format";
 import {
@@ -83,13 +84,25 @@ const emit = defineEmits<{
 }>();
 
 const connections = useConnectionsStore();
-const explorer = useExplorerStore();
+const workspace = useWorkspaceStore();
 const transfers = useTransferStore();
 const conflicts = useConflictStore();
 const clip = useClipboardStore();
 const editor = useEditorStore();
 const terminalStore = useTerminalStore();
 const settings = useSettingsStore();
+
+// 工作区会话：单标签单窗格初始化（M7 步骤 2/3 扩展为多标签/双栏），
+// 活动窗格的浏览器状态即本组件与子组件共用的 explorer 实例
+if (connections.active) {
+  workspace.init(
+    connections.active.connectionId,
+    connections.active.profile.id,
+    connections.active.alias,
+  );
+}
+/** 活动窗格实例（单窗格阶段 activePaneId 恒定；双栏阶段改经窗格组件分发） */
+const explorer = useExplorer(workspace.activePaneId);
 
 /** 双击文本文件 → 打开编辑抽屉 */
 function onOpenFile(entry: FileEntry) {
@@ -846,7 +859,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("pointerdown", onMouseSideButton, true);
   clearTimeout(hintTimer);
   unlistenDrag?.();
-  // 工作区销毁（断开连接）→ 终端面板复位 + 内部剪贴板清空
+  // 工作区销毁（断开连接）：回收窗格 explorer 实例 + 终端面板复位 + 内部剪贴板清空
+  workspace.resetAll();
   terminalStore.reset();
   clip.clear();
 });
@@ -1053,7 +1067,7 @@ function onKeydown(e: KeyboardEvent) {
              （flex 末项右缘固定、左缘向左扫出，四条边框全程绘制，内容定宽防回流） -->
         <div class="mx-1.5 flex min-w-0 flex-1 items-center gap-1.5">
           <div class="min-w-0 flex-1 overflow-hidden">
-            <Breadcrumbs />
+            <Breadcrumbs :pane-id="workspace.activePaneId" />
           </div>
 
           <div
@@ -1221,7 +1235,11 @@ function onKeydown(e: KeyboardEvent) {
               <X :size="13" />
             </button>
           </div>
-          <FileTable @context-menu="onFileContextMenu" @open-file="onOpenFile" />
+          <FileTable
+            :pane-id="workspace.activePaneId"
+            @context-menu="onFileContextMenu"
+            @open-file="onOpenFile"
+          />
         </div>
 
         <!-- 拖拽悬停覆盖层：释放以上传到当前目录 -->

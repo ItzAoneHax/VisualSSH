@@ -104,10 +104,15 @@ function saveLastDir(profileId: string, dir: string) {
 }
 
 /**
- * 远程文件浏览器状态（单工作区）。
+ * 远程文件浏览器状态（每「标签×窗格」一个实例，M7）。
  * 含浏览历史栈，支持资源管理器语义的后退/前进。
+ *
+ * 实例化选型：动态 id 的 Pinia defineStore（explorer-{paneId}）+ 工厂缓存——
+ * 现有 setup 体原样复用（目录/历史/选择/搜索/草稿全套状态零改动），
+ * 各实例经 Pinia 天然隔离，devtools 可见；关闭窗格经 disposeExplorer 显式回收。
+ * 组件一律经 useExplorer(paneId) 取实例，不直接使用本模块的 defineStore 产物。
  */
-export const useExplorerStore = defineStore("explorer", () => {
+function buildExplorerStore() {
   const connectionId = ref("");
   /** 目录记忆/侧栏收藏的键（profile.id；连接切换时更新） */
   const profileId = ref("");
@@ -817,4 +822,39 @@ export const useExplorerStore = defineStore("explorer", () => {
     exitSearch,
     enterSearchEntry,
   };
-});
+}
+
+/** 实例类型（组件 prop 与消费方引用用） */
+export type ExplorerStore = ReturnType<typeof useExplorer>;
+
+/** paneId → defineStore 产物缓存（同一 paneId 复用同一 store 定义） */
+const storeFactories = new Map<string, ReturnType<typeof buildExplorerUse>>();
+
+function buildExplorerUse(paneId: string) {
+  return defineStore(`explorer-${paneId}`, buildExplorerStore);
+}
+
+/** 取（或创建）某「标签×窗格」的浏览器状态实例 */
+export function useExplorer(paneId: string) {
+  let factory = storeFactories.get(paneId);
+  if (!factory) {
+    factory = buildExplorerUse(paneId);
+    storeFactories.set(paneId, factory);
+  }
+  return factory();
+}
+
+/** 关闭窗格/标签时回收实例：先 clear()（释放搜索事件监听等外部资源）再 $dispose */
+export function disposeExplorer(paneId: string) {
+  const factory = storeFactories.get(paneId);
+  if (!factory) return;
+  storeFactories.delete(paneId);
+  let store: ExplorerStore;
+  try {
+    store = factory();
+  } catch {
+    return; // pinia 未安装（异常时序）：定义已删，无状态可清
+  }
+  store.clear();
+  store.$dispose();
+}
