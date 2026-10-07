@@ -12,7 +12,15 @@ import {
 } from "@/stores/explorer";
 import { useSettingsStore } from "@/stores/settings";
 import type { FileEntry } from "@/types";
-import { formatMtime, formatSize, kindLabel } from "@/utils/format";
+import { formatMtime, formatSize, joinPath, kindLabel } from "@/utils/format";
+import {
+  hasFilesPayload,
+  readFilesPayload,
+  resolveDragNames,
+  resolveDropMode,
+  writeFilesPayload,
+  type FilesDragPayload,
+} from "@/utils/dragDrop";
 
 const props = defineProps<{ paneId: string }>();
 
@@ -203,6 +211,8 @@ function openEntry(entry: FileEntry) {
 const emit = defineEmits<{
   contextMenu: [payload: { entry: FileEntry | null; x: number; y: number }];
   openFile: [entry: FileEntry];
+  /** 行内拖拽落点（空白/文件夹行）：载荷 + 目标目录 + 是否按住 Ctrl（复制） */
+  dropFiles: [payload: FilesDragPayload, targetDir: string, ctrlKey: boolean];
 }>();
 
 /** 就地编辑的实时值（重命名初值 = 原名，新建为空） */
@@ -342,9 +352,9 @@ function hitTest(x1: number, y1: number, x2: number, y2: number): string[] {
 
 function onContainerPointerDown(e: PointerEvent) {
   if (e.button !== 0) return;
-  // 按钮/输入框不启动框选；行上按下也允许拖拽框选（Explorer 语义，文本已全局禁选）
-  if ((e.target as HTMLElement).closest("button, input, textarea, [contenteditable]")) return;
-  const fromRow = !!(e.target as HTMLElement).closest("[data-row]");
+  // 按钮/输入框不启动框选；行上按下也不启动——行可拖拽（M7 行内拖拽），
+  // 行上拖动 = 移动/复制文件，点击/多选仍由行自身处理
+  if ((e.target as HTMLElement).closest("button, input, textarea, [contenteditable], [data-row]")) return;
   const startX = e.clientX;
   const startY = e.clientY;
   const additive = e.ctrlKey;
@@ -376,7 +386,7 @@ function onContainerPointerDown(e: PointerEvent) {
     if (raf) cancelAnimationFrame(raf);
     if (moved) {
       explorer.applyRubberSelection(hitTest(startX, startY, ev.clientX, ev.clientY), additive);
-    } else if (!fromRow) {
+    } else {
       // 未拖动的空白单击：清除选择（行上的单击交给行自身 click 处理）
       explorer.clearSelection();
     }
@@ -386,6 +396,109 @@ function onContainerPointerDown(e: PointerEvent) {
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
 }
+
+/** —— 行内拖拽（M7 步骤 4）：行 draggable，dragstart 写自定义载荷 + 「N 项」拖影；
+ *  默认移动、Ctrl 复制（拖影角标随 drag 事件的按键状态切换）；落点走 drop-files 事件 —— */
+
+/** 拖影 ghost（屏幕外挂载供 setDragImage；drag 事件里同步 Ctrl 角标） */
+let ghostEl: HTMLElement | null = null;
+let ghostBadge: HTMLElement | null = null;
+
+function startDragGhost(e: DragEvent, count: number) {
+  removeDragGhost();
+  ghostEl = document.createElement("div");
+  ghostEl.style.cssText =
+    "position:fixed;top:-200px;left:-200px;display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:4px;background:var(--accent);color:var(--accent-fg);font-size:12px;font-weight:600;pointer-events:none;z-index:9999;white-space:nowrap;";
+  ghostEl.textContent = count > 1 ? `${count} 项` : "1 项";
+  ghostBadge = document.createElement("span");
+  ghostBadge.textContent = "+";
+  ghostBadge.style.cssText = "display:none;font-weight:700;";
+  ghostEl.appendChild(ghostBadge);
+  document.body.appendChild(ghostEl);
+  if (e.dataTransfer) {
+    try {
+      e.dataTransfer.setDragImage(ghostEl, 10, 10);
+    } catch {
+      // 个别环境不支持自定义拖影：退回浏览器默认
+    }
+  }
+}
+
+function removeDragGhost() {
+  ghostEl?.remove();
+  ghostEl = null;
+  ghostBadge = null;
+}
+
+/** drag 事件持续触发：Ctrl 按下 → 角标显示「+」（复制语义），松开移除 */
+function onRowDrag(e: DragEvent) {
+  if (ghostBadge) ghostBadge.style.display = e.ctrlKey ? "inline" : "none";
+}
+
+function onRowDragStart(entry: FileEntry, e: DragEvent) {
+  // 搜索结果行（键为 relPath）不做行内拖拽：载荷按「源目录内名称」语义
+  if (inSearch.value || !explorer.connectionId) {
+    e.preventDefault();
+    return;
+  }
+  const names = resolveDragNames(entry.name, explorer.selectedNames);
+  writeFilesPayload(e.dataTransfer!, {
+    connectionId: explorer.connectionId,
+    dir: explorer.cwd,
+    names,
+  });
+  startDragGhost(e, names.length);
+}
+
+function onRowDragEnd() {
+  dragOverDir.value = null;
+  removeDragGhost();
+}
+
+/** 文件夹行 dragover：命中高亮 + 放行 drop（stopPropagation 防止落到空白） */
+function onRowDragOver(entry: FileEntry, e: DragEvent) {
+  if (entry.kind !== "dir" || !hasFilesPayload(e.dataTransfer!)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.dataTransfer!.dropEffect = resolveDropMode(e.ctrlKey) === "copy" ? "copy" : "move";
+  dragOverDir.value = entry.name;
+}
+
+function onRowDragLeave(entry: FileEntry) {
+  if (dragOverDir.value === entry.name) dragOverDir.value = null;
+}
+
+function onRowDrop(entry: FileEntry, e: DragEvent) {
+  if (entry.kind !== "dir") return;
+  e.preventDefault();
+  e.stopPropagation();
+  dragOverDir.value = null;
+  removeDragGhost();
+  const payload = readFilesPayload(e.dataTransfer!);
+  if (!payload) return;
+  emit("dropFiles", payload, joinPath(explorer.cwd, entry.name), e.ctrlKey);
+}
+
+/** 文件区空白落点 = 当前目录（行内 drop 已 stopPropagation） */
+function onBlankDragOver(e: DragEvent) {
+  if (!hasFilesPayload(e.dataTransfer!)) return;
+  e.preventDefault();
+  e.dataTransfer!.dropEffect = resolveDropMode(e.ctrlKey) === "copy" ? "copy" : "move";
+  dragOverDir.value = ".";
+}
+
+function onBlankDrop(e: DragEvent) {
+  if (!hasFilesPayload(e.dataTransfer!)) return;
+  e.preventDefault();
+  if (dragOverDir.value === ".") dragOverDir.value = null;
+  removeDragGhost();
+  const payload = readFilesPayload(e.dataTransfer!);
+  if (!payload) return;
+  emit("dropFiles", payload, explorer.cwd, e.ctrlKey);
+}
+
+/** 文件夹行拖拽命中高亮（hover 高亮语义；"." 代表空白区） */
+const dragOverDir = ref<string | null>(null);
 </script>
 
 <template>
@@ -397,6 +510,8 @@ function onContainerPointerDown(e: PointerEvent) {
     @dblclick="onBlankDblClick"
     @contextmenu.prevent="onBlankContextMenu($event)"
     @wheel="onWheel"
+    @dragover="onBlankDragOver"
+    @drop="onBlankDrop"
   >
     <!-- 列头：40 高、左距 24、底部分隔线，点击排序；右缘 4px 拖宽/双击自适应；右键勾选列显隐 -->
     <div
@@ -485,15 +600,23 @@ function onContainerPointerDown(e: PointerEvent) {
               ? 'bg-row-active hover:bg-row-active-hover'
               : 'hover:bg-row-hover',
             isCutRow(entry) && 'opacity-40',
+            dragOverDir === entry.name && 'bg-row-active ring-1 ring-[var(--accent)]',
           ]"
           role="row"
           :data-row="rowKey(entry)"
           :aria-selected="explorer.isSelected(rowKey(entry))"
           tabindex="0"
+          :draggable="!inSearch"
           @click.stop="onRowClick(entry, $event)"
           @dblclick.stop="onRowDblClick(entry)"
           @contextmenu.stop.prevent="onRowContextMenu(entry, $event)"
           @keydown.enter="entry.kind === 'dir' && explorer.enter(entry.name)"
+          @dragstart="onRowDragStart(entry, $event)"
+          @drag="onRowDrag($event)"
+          @dragend="onRowDragEnd"
+          @dragover="onRowDragOver(entry, $event)"
+          @dragleave="onRowDragLeave(entry)"
+          @drop="onRowDrop(entry, $event)"
         >
           <!-- 选中指示竖条（WinUI ListViewItemPresenter SelectionIndicator：3×16、1.5 圆角、左缘居中） -->
           <span

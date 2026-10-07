@@ -28,7 +28,6 @@ import {
   X,
 } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { tempDir } from "@tauri-apps/api/path";
 
 import ContextMenu from "@/components/common/ContextMenu.vue";
 import type { MenuItem } from "@/components/common/DropdownMenu.vue";
@@ -49,8 +48,14 @@ import { useTransferStore } from "@/stores/transfer";
 import { useWorkspaceStore } from "@/stores/workspace";
 import type { FileEntry } from "@/types";
 import { copyText, joinPath, pathBaseName } from "@/utils/format";
+import {
+  isCrossConnection,
+  isSameDir,
+  resolveDropMode,
+  type FilesDragPayload,
+} from "@/utils/dragDrop";
+import { remoteMoveCopy } from "@/utils/remoteOps";
 import { copyVirtualFiles, readClipboardFiles } from "@/api/clipboard";
-import { execSsh, listDir, renameSsh, type ExecOutput } from "@/api/ssh";
 import { localFileMeta } from "@/api/transfer";
 
 /**
@@ -213,8 +218,7 @@ async function pasteFromClipboard(pasteIntoSelection = false) {
   }
 }
 
-/** 远端粘贴：先过冲突对话框（目标 = 粘贴目录），再按模式执行。
- *  cut = SFTP rename → exec mv -f 回退；copy = exec cp -a → 单文件「暂存下载→上传」回退。 */
+/** 远端粘贴：内部剪贴板语义（源 = 剪贴板记录）→ 冲突解析与执行走 remoteMoveCopy 共用管线 */
 async function pasteRemote(cid: string, pasteIntoSelection: boolean) {
   const c = clip.clip;
   if (!c) return;
@@ -231,114 +235,58 @@ async function pasteRemote(cid: string, pasteIntoSelection: boolean) {
     return;
   }
 
-  // 源目录现状：取条目元数据（同时校验源项仍存在，删除/移动后标记自然失效）
-  let sourceEntries: FileEntry[];
   try {
-    sourceEntries = await listDir(cid, c.sourceDir);
-  } catch (e) {
-    explorer.error = e instanceof Error ? e.message : String(e);
-    return;
-  }
-  const byName = new Map(sourceEntries.map((e) => [e.name, e]));
-  const present = c.names.filter((n) => byName.has(n));
-  if (!present.length) {
+    const result = await remoteMoveCopy(cid, c.sourceDir, c.names, targetDir, c.mode === "cut" ? "move" : "copy");
     clip.clear();
-    return;
-  }
-  const incoming: IncomingItem[] = present.map((n) => {
-    const e = byName.get(n)!;
-    return { name: e.name, size: e.size, mtime: e.mtime, kind: e.kind };
-  });
-
-  let decisions;
-  try {
-    decisions = await conflicts.resolve(cid, targetDir, incoming);
-  } catch (e) {
-    explorer.error = e instanceof Error ? e.message : String(e);
-    return;
-  }
-  if (!decisions) return;
-  const jobs = decisions
-    .filter((d) => d.action === "proceed")
-    .map((d) => ({ ...d, source: byName.get(d.name)! }));
-  if (!jobs.length) return; // 全部跳过：剪贴板保留
-
-  const op = await transfers.startRemoteOp(
-    c.mode === "cut" ? "remote-move" : "remote-copy",
-    jobs.length,
-    targetDir,
-  );
-  const failed: string[] = [];
-  let done = 0;
-  for (const job of jobs) {
-    if (op.isCancelled()) break;
-    const src = joinPath(c.sourceDir, job.name);
-    const dst = joinPath(targetDir, job.finalName);
-    try {
-      if (c.mode === "cut") {
-        try {
-          // 同文件系统跨目录改名零拷贝
-          await renameSsh(cid, src, dst);
-        } catch {
-          const r = await execSsh(cid, "mv", ["-f", "--", src, dst]);
-          if (r.exitCode !== 0) {
-            throw new Error(r.stderr.trim() || `mv 退出码 ${r.exitCode ?? "未知"}`);
-          }
-        }
-      } else {
-        let result: ExecOutput | null = null;
-        try {
-          result = await execSsh(cid, "cp", ["-a", "--", src, dst]);
-        } catch {
-          result = null;
-        }
-        if (!result || result.exitCode === 126 || result.exitCode === 127) {
-          // shell/cp 不可用：仅单文件可走「暂存下载→上传」回退
-          if (job.source.kind !== "file") {
-            throw new Error("服务器 shell 不可用，无法复制文件夹");
-          }
-          await fallbackCopyViaTemp(cid, src, job.finalName, targetDir);
-        } else if (result.exitCode !== 0) {
-          throw new Error(result.stderr.trim() || `cp 退出码 ${result.exitCode ?? "未知"}`);
-        }
-      }
-      done += 1;
-    } catch (e) {
-      failed.push(`${job.name}: ${e instanceof Error ? e.message : String(e)}`);
+    if (targetDir === explorer.cwd || c.sourceDir === explorer.cwd) {
+      await explorer.reloadPreserve();
     }
-  }
-
-  if (op.isCancelled()) {
-    // cancelRemoteOp 已把卡片置为已取消
-  } else if (failed.length) {
-    op.setFailed(`完成 ${done} 项，失败 ${failed.length} 项 — ${failed[0]}`);
-  } else {
-    op.setDone();
-  }
-  clip.clear();
-  if (targetDir === explorer.cwd || c.sourceDir === explorer.cwd) {
-    await explorer.reloadPreserve();
-  }
-  if (!failed.length && !op.isCancelled()) {
-    showHint(`已${c.mode === "cut" ? "移动" : "复制"} ${done} 项`);
-  } else if (failed.length) {
-    explorer.error = `${c.mode === "cut" ? "移动" : "复制"}未全部完成 — ${failed.join("；")}`;
+    if (result.cancelled) {
+      // cancelRemoteOp 已把卡片置为已取消
+    } else if (result.failed.length) {
+      explorer.error = `${c.mode === "cut" ? "移动" : "复制"}未全部完成 — ${result.failed.join("；")}`;
+    } else {
+      showHint(`已${c.mode === "cut" ? "移动" : "复制"} ${result.done} 项`);
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message !== "cancelled") explorer.error = message;
   }
 }
 
-/** exec 不可用时的单文件复制回退：暂存下载到本地临时目录再上传（复用传输中心管线） */
-async function fallbackCopyViaTemp(
-  cid: string,
-  remotePath: string,
-  name: string,
-  targetDir: string,
-) {
-  const base = (await tempDir()).replace(/[\\/]+$/, "");
-  const local = `${base}/VisualSSH/${crypto.randomUUID()}-${name}`;
-  const transferId = await transfers.startDownloadTo(cid, remotePath, local);
-  const ok = await transfers.waitAllDone([transferId]);
-  if (!ok) throw new Error(`暂存下载失败（${name}）`);
-  await transfers.startUpload(cid, local, targetDir, name);
+/** —— 行内拖拽落点（M7 步骤 4）：文件区空白 / 文件夹行 / 面包屑分段 → 移动/复制 —— */
+async function onFilesDropped(payload: FilesDragPayload, targetDir: string, ctrlKey: boolean) {
+  if (isCrossConnection(payload, connectionId.value)) {
+    showHint("暂不支持跨连接拖拽");
+    return;
+  }
+  if (isSameDir(payload, targetDir)) {
+    showHint("源目录与目标目录相同");
+    return;
+  }
+  const mode = resolveDropMode(ctrlKey);
+  try {
+    const result = await remoteMoveCopy(
+      connectionId.value,
+      payload.dir,
+      payload.names,
+      targetDir,
+      mode,
+    );
+    if (result.cancelled) return;
+    if (result.failed.length) {
+      explorer.error = `${mode === "move" ? "移动" : "复制"}未全部完成 — ${result.failed.join("；")}`;
+    } else {
+      showHint(`已${mode === "move" ? "移动" : "复制"} ${result.done} 项`);
+    }
+    // 目标目录是当前目录（或源目录是当前目录）→ 刷新
+    if (targetDir === explorer.cwd || payload.dir === explorer.cwd) {
+      await explorer.reloadPreserve();
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message !== "cancelled") explorer.error = message;
+  }
 }
 
 /** Files 快速跳转 → 按 profile 固定的侧栏收藏（PinFolderToSidebarAction 语义） */
@@ -850,10 +798,10 @@ function onKeydown(e: KeyboardEvent) {
         <RefreshCw :size="15" :class="explorer.loading && 'animate-spin'" />
       </button>
 
-      <!-- 面包屑（搜索框经 #actions 注入，位置在其右侧与现状一致） -->
+      <!-- 面包屑（搜索框经 #actions 注入，位置在其右侧与现状一致；分段可作拖拽落点） -->
       <div class="mx-1.5 flex min-w-0 flex-1 items-center gap-1.5">
         <div class="min-w-0 flex-1 overflow-hidden">
-          <Breadcrumbs :pane-id="paneId" />
+          <Breadcrumbs :pane-id="paneId" @drop-files="onFilesDropped" />
         </div>
       </div>
 
@@ -942,7 +890,12 @@ function onKeydown(e: KeyboardEvent) {
             <X :size="13" />
           </button>
         </div>
-        <FileTable :pane-id="paneId" @context-menu="onFileContextMenu" @open-file="onOpenFile" />
+        <FileTable
+          :pane-id="paneId"
+          @context-menu="onFileContextMenu"
+          @open-file="onOpenFile"
+          @drop-files="(payload, dir, ctrl) => onFilesDropped(payload, dir, ctrl)"
+        />
       </div>
     </div>
 

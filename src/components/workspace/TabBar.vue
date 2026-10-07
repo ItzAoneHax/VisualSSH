@@ -7,6 +7,15 @@ import type { MenuItem } from "@/components/common/DropdownMenu.vue";
 import { useConnectionsStore } from "@/stores/connections";
 import { useExplorer } from "@/stores/explorer";
 import { useWorkspaceStore, type WorkspaceTab } from "@/stores/workspace";
+import {
+  FILES_DND_TYPE,
+  hasFilesPayload,
+  isCrossConnection,
+  isSameDir,
+  readFilesPayload,
+  resolveDropMode,
+} from "@/utils/dragDrop";
+import { remoteMoveCopy } from "@/utils/remoteOps";
 
 /**
  * 标签条（M7 步骤 2，对照 Files UserControls/TabBar）：
@@ -19,6 +28,8 @@ import { useWorkspaceStore, type WorkspaceTab } from "@/stores/workspace";
 const emit = defineEmits<{
   "new-tab": [e?: MouseEvent];
   "reopen-tab": [];
+  /** 文件拖到「+」：新标签打开该源目录 */
+  "open-path": [path: string];
 }>();
 
 const workspace = useWorkspaceStore();
@@ -64,6 +75,91 @@ function onTabDrop(index: number, e: DragEvent) {
 
 function onDragLeave() {
   dragOverIndex.value = -1;
+}
+
+/** 标签上的拖拽分流：文件载荷（x-visualssh-files）走移动/复制落点，
+ *  标签重排载荷（x-visualssh-tab）走重排（类型互斥） */
+function onTabDragOverCombined(tab: WorkspaceTab, index: number, e: DragEvent) {
+  if (e.dataTransfer?.types.includes(FILES_DND_TYPE)) onTabFileDragOver(tab, e);
+  else onTabDragOver(index, e);
+}
+
+function onTabDropCombined(tab: WorkspaceTab, index: number, e: DragEvent) {
+  if (e.dataTransfer?.types.includes(FILES_DND_TYPE)) void onTabFileDrop(tab, e);
+  else onTabDrop(index, e);
+}
+
+function onTabDragLeaveCombined(tab: WorkspaceTab) {
+  onTabFileDragLeave(tab);
+}
+
+/** —— 文件拖到标签（Files TabBar.xaml.cs TabViewItem_Drop：移动/复制到该标签当前目录；
+ *  拖到「+」= 新标签打开源目录，TabBarAddNewTabButton_Drop） —— */
+const fileDragOverTabId = ref<string | null>(null);
+const fileDragOverPlus = ref(false);
+
+function onTabFileDragOver(tab: WorkspaceTab, e: DragEvent) {
+  if (!hasFilesPayload(e.dataTransfer!)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.dataTransfer!.dropEffect = resolveDropMode(e.ctrlKey) === "copy" ? "copy" : "move";
+  fileDragOverTabId.value = tab.id;
+}
+
+function onTabFileDragLeave(tab: WorkspaceTab) {
+  if (fileDragOverTabId.value === tab.id) fileDragOverTabId.value = null;
+}
+
+async function onTabFileDrop(tab: WorkspaceTab, e: DragEvent) {
+  if (!hasFilesPayload(e.dataTransfer!)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  fileDragOverTabId.value = null;
+  const payload = readFilesPayload(e.dataTransfer!);
+  if (!payload) return;
+  const target = useExplorer(tab.activePaneId);
+  if (isCrossConnection(payload, tab.connectionId)) {
+    target.error = "暂不支持跨连接拖拽";
+    return;
+  }
+  if (isSameDir(payload, target.cwd)) return;
+  const mode = resolveDropMode(e.ctrlKey);
+  try {
+    const result = await remoteMoveCopy(
+      tab.connectionId,
+      payload.dir,
+      payload.names,
+      target.cwd,
+      mode,
+    );
+    if (result.cancelled) return;
+    if (result.failed.length) {
+      target.error = `${mode === "move" ? "移动" : "复制"}未全部完成 — ${result.failed.join("；")}`;
+    }
+    await target.reloadPreserve();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message !== "cancelled") target.error = message;
+  }
+}
+
+function onPlusDragOver(e: DragEvent) {
+  if (!hasFilesPayload(e.dataTransfer!)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.dataTransfer!.dropEffect = "link";
+  fileDragOverPlus.value = true;
+}
+
+/** 拖到「+」：新标签打开该源目录（同连接复用会话；Files OpenPathInNewTab） */
+function onPlusDrop(e: DragEvent) {
+  if (!hasFilesPayload(e.dataTransfer!)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  fileDragOverPlus.value = false;
+  const payload = readFilesPayload(e.dataTransfer!);
+  if (!payload) return;
+  emit("open-path", payload.dir);
 }
 
 /** —— 右键菜单（Files TabBar.xaml TabFlyout：新建/复制/关闭左侧/右侧/其他 + 关闭/重开） —— */
@@ -149,6 +245,7 @@ function duplicateTab(tab: WorkspaceTab) {
           ? 'border-[var(--line)] font-semibold text-ink'
           : 'border-transparent text-dim hover:bg-fill-subtle hover:text-ink',
         dragOverIndex === i && 'bg-fill-subtle',
+        fileDragOverTabId === tab.id && 'ring-1 ring-[var(--accent)] bg-fill-subtle',
       ]"
       :style="tab.id === workspace.activeTabId ? { background: 'var(--fill-control)' } : undefined"
       :title="tooltipOf(tab)"
@@ -157,8 +254,9 @@ function duplicateTab(tab: WorkspaceTab) {
       @auxclick.middle.prevent="onCloseRequest(tab)"
       @contextmenu.prevent="onTabContextMenu(tab, $event)"
       @dragstart="onTabDragStart(tab, $event)"
-      @dragover="onTabDragOver(i, $event)"
-      @drop="onTabDrop(i, $event)"
+      @dragover="onTabDragOverCombined(tab, i, $event)"
+      @drop="onTabDropCombined(tab, i, $event)"
+      @dragleave="onTabDragLeaveCombined(tab)"
     >
       <Folder
         :size="14"
@@ -178,13 +276,17 @@ function duplicateTab(tab: WorkspaceTab) {
       </button>
     </div>
 
-    <!-- 新建标签（Files TabBarAddNewTabButton：30×30 透明底） -->
+    <!-- 新建标签（Files TabBarAddNewTabButton：30×30 透明底；可接收文件拖放 = 新标签打开源目录） -->
     <button
       type="button"
       class="btn-icon mb-0.5 h-[30px] w-[30px] shrink-0"
-      title="新建标签（Ctrl+T）"
+      :class="fileDragOverPlus && 'text-accent'"
+      title="新建标签（Ctrl+T）— 拖入文件夹在此打开"
       aria-label="新建标签"
       @click="emit('new-tab', $event)"
+      @dragover="onPlusDragOver"
+      @dragleave="fileDragOverPlus = false"
+      @drop="onPlusDrop"
     >
       <Plus :size="14" />
     </button>

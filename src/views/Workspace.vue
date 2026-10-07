@@ -35,6 +35,15 @@ import { useTerminalStore } from "@/stores/terminal";
 import { useTransferStore } from "@/stores/transfer";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { formatSize, pathBaseName } from "@/utils/format";
+import {
+  hasFilesPayload,
+  isCrossConnection,
+  isSameDir,
+  readFilesPayload,
+  resolveDropMode,
+  type FilesDragPayload,
+} from "@/utils/dragDrop";
+import { remoteMoveCopy } from "@/utils/remoteOps";
 import { fsInfo, type FsInfo } from "@/api/ssh";
 import { localFileMeta } from "@/api/transfer";
 
@@ -334,6 +343,83 @@ function onPinMenuSelect(key: string) {
   else if (key === "unpin" && pid) pinnedStore.unpin(pid, menu.path);
 }
 
+/** —— 行内拖拽落点（M7 步骤 4，Files SidebarViewModel.cs HandleLocationItemDroppedAsync）：
+ *  拖到具体收藏项 = 移动/复制到该目录；拖到 Pinned 区空白 = 固定该源文件夹 —— */
+const pinDragOverPath = ref<string | null>(null);
+const pinBlankOver = ref(false);
+
+function onPinDragOver(path: string, e: DragEvent) {
+  if (!hasFilesPayload(e.dataTransfer!)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.dataTransfer!.dropEffect = resolveDropMode(e.ctrlKey) === "copy" ? "copy" : "move";
+  pinDragOverPath.value = path;
+}
+
+function onPinDrop(path: string, e: DragEvent) {
+  if (!hasFilesPayload(e.dataTransfer!)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  pinDragOverPath.value = null;
+  const payload = readFilesPayload(e.dataTransfer!);
+  const ex = activeExplorer.value;
+  const cid = activeConn.value?.connectionId;
+  if (!payload || !ex || !cid) return;
+  void executePaneMoveCopy(payload, path, e.ctrlKey, ex, cid);
+}
+
+/** Pinned 区空白（nav 自身收到 drop = 非按钮区域）：固定源文件夹（仅文件夹） */
+function onPinBlankDragOver(e: DragEvent) {
+  if (!hasFilesPayload(e.dataTransfer!)) return;
+  e.preventDefault();
+  pinBlankOver.value = true;
+}
+
+function onPinBlankDrop(e: DragEvent) {
+  if (!hasFilesPayload(e.dataTransfer!)) return;
+  e.preventDefault();
+  pinBlankOver.value = false;
+  const payload = readFilesPayload(e.dataTransfer!);
+  const ex = activeExplorer.value;
+  const pid = activeTab.value?.profileId;
+  if (!payload || !ex || !pid) return;
+  if (isCrossConnection(payload, activeConn.value?.connectionId ?? "")) {
+    ex.error = "暂不支持跨连接拖拽";
+    return;
+  }
+  // 固定源目录本身；拖多选时仅固定源目录（与 Files 一致：逐项固定目录）
+  if (payload.dir !== "/" && !pinnedStore.isPinned(pid, payload.dir)) {
+    pinnedStore.pin(pid, { name: pathBaseName(payload.dir) || payload.dir, path: payload.dir });
+  }
+}
+
+/** 活动窗格连接上的移动/复制执行（侧栏落点；结果横幅写窗格 error/hint 不可达——用 error 承载失败） */
+async function executePaneMoveCopy(
+  payload: FilesDragPayload,
+  targetDir: string,
+  ctrlKey: boolean,
+  ex: { error: string | null; reloadPreserve: () => Promise<void>; cwd: string },
+  cid: string,
+) {
+  if (isCrossConnection(payload, cid)) {
+    ex.error = "暂不支持跨连接拖拽";
+    return;
+  }
+  if (isSameDir(payload, targetDir)) return;
+  const mode = resolveDropMode(ctrlKey);
+  try {
+    const result = await remoteMoveCopy(cid, payload.dir, payload.names, targetDir, mode);
+    if (result.cancelled) return;
+    if (result.failed.length) {
+      ex.error = `${mode === "move" ? "移动" : "复制"}未全部完成 — ${result.failed.join("；")}`;
+    }
+    if (targetDir === ex.cwd || payload.dir === ex.cwd) await ex.reloadPreserve();
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message !== "cancelled") ex.error = message;
+  }
+}
+
 /** 上传冲突解析（拖放共用）：有同名先弹对话框，取消/出错返回 null */
 async function resolveUploadConflicts(
   localPaths: string[],
@@ -442,16 +528,30 @@ watch(
             <span class="ml-3 truncate">主页</span>
           </button>
 
-          <p class="mt-4 mb-1 px-2.5 text-xs font-medium text-faint">此服务器</p>
+          <p
+            class="mt-4 mb-1 px-2.5 text-xs font-medium text-faint"
+            :class="pinBlankOver && 'rounded bg-fill-subtle ring-1 ring-[var(--accent)]'"
+            @dragover="onPinBlankDragOver"
+            @dragleave="pinBlankOver = false"
+            @drop="onPinBlankDrop"
+          >
+            此服务器
+          </p>
           <button
             v-for="link in pinnedFolders"
             :key="link.path"
             type="button"
             class="nav-item"
-            :class="activeExplorer?.cwd === link.path && 'active'"
+            :class="[
+              activeExplorer?.cwd === link.path && 'active',
+              pinDragOverPath === link.path && 'bg-row-active ring-1 ring-[var(--accent)]',
+            ]"
             :title="link.path"
             @click="activeExplorer?.open(link.path)"
             @contextmenu.prevent="onPinContextMenu(link, $event)"
+            @dragover="onPinDragOver(link.path, $event)"
+            @dragleave="pinDragOverPath === link.path && (pinDragOverPath = null)"
+            @drop="onPinDrop(link.path, $event)"
           >
             <component :is="PIN_ICONS[link.icon]" :size="16" class="ml-1 shrink-0" />
             <span class="ml-3 truncate">{{ link.name }}</span>

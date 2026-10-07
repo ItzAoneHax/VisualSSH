@@ -5,6 +5,12 @@ import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { listDir } from "@/api/ssh";
 import { useExplorer } from "@/stores/explorer";
 import { joinPath } from "@/utils/format";
+import {
+  hasFilesPayload,
+  readFilesPayload,
+  resolveDropMode,
+  type FilesDragPayload,
+} from "@/utils/dragDrop";
 
 const props = defineProps<{ paneId: string }>();
 
@@ -141,6 +147,35 @@ function onKeydown(e: KeyboardEvent) {
 onBeforeUnmount(() => {
   if (debounceTimer) clearTimeout(debounceTimer);
 });
+
+/** —— 行内拖拽落点（M7 步骤 4）：面包屑分段 = 移动/复制到该祖先目录（Explorer 惯例） —— */
+const emit = defineEmits<{
+  dropFiles: [payload: FilesDragPayload, targetDir: string, ctrlKey: boolean];
+}>();
+
+const dragOverPath = ref<string | null>(null);
+
+function onCrumbDragOver(path: string, e: DragEvent) {
+  if (!hasFilesPayload(e.dataTransfer!)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.dataTransfer!.dropEffect = resolveDropMode(e.ctrlKey) === "copy" ? "copy" : "move";
+  dragOverPath.value = path;
+}
+
+function onCrumbDragLeave(path: string) {
+  if (dragOverPath.value === path) dragOverPath.value = null;
+}
+
+function onCrumbDrop(path: string, e: DragEvent) {
+  if (!hasFilesPayload(e.dataTransfer!)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  dragOverPath.value = null;
+  const payload = readFilesPayload(e.dataTransfer!);
+  if (!payload) return;
+  emit("dropFiles", payload, path, e.ctrlKey);
+}
 </script>
 
 <template>
@@ -153,13 +188,19 @@ onBeforeUnmount(() => {
       aria-label="路径导航"
       @click.self="enterEdit"
     >
-      <!-- 根项（悬浮高亮为直角矩形） -->
+      <!-- 根项（悬浮高亮为直角矩形；可作拖拽落点 = 根目录） -->
       <button
         type="button"
         class="flex h-8 shrink-0 items-center gap-1.5 rounded-[2px] pr-2 pl-3 text-sm transition-colors"
-        :class="explorer.cwd === '/' ? 'font-semibold text-ink' : 'text-dim hover:bg-fill-subtle hover:text-ink'"
+        :class="[
+          explorer.cwd === '/' ? 'font-semibold text-ink' : 'text-dim hover:bg-fill-subtle hover:text-ink',
+          dragOverPath === '/' && 'bg-row-active ring-1 ring-[var(--accent)]',
+        ]"
         title="/"
         @click.stop="explorer.open('/')"
+        @dragover="onCrumbDragOver('/', $event)"
+        @dragleave="onCrumbDragLeave('/')"
+        @drop="onCrumbDrop('/', $event)"
       >
         <HardDrive :size="14" class="shrink-0" />
         <span v-if="explorer.cwd === '/'">此电脑</span>
@@ -170,11 +211,17 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="h-8 shrink-0 rounded-[2px] px-2 text-sm whitespace-nowrap transition-colors"
-          :class="i === crumbs.length - 1
-            ? 'font-semibold text-ink'
-            : 'text-dim hover:bg-fill-subtle hover:text-ink'"
+          :class="[
+            i === crumbs.length - 1
+              ? 'font-semibold text-ink'
+              : 'text-dim hover:bg-fill-subtle hover:text-ink',
+            dragOverPath === crumb.path && 'bg-row-active ring-1 ring-[var(--accent)]',
+          ]"
           :title="crumb.path"
           @click.stop="i < crumbs.length - 1 && explorer.open(crumb.path)"
+          @dragover="onCrumbDragOver(crumb.path, $event)"
+          @dragleave="onCrumbDragLeave(crumb.path)"
+          @drop="onCrumbDrop(crumb.path, $event)"
         >
           {{ crumb.name }}
         </button>
