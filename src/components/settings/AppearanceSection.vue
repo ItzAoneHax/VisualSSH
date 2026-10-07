@@ -7,6 +7,7 @@ import {
   PanelBottom,
   SquareTerminal,
   X,
+  ArrowDownUp,
 } from "@lucide/vue";
 import { ChevronDown } from "@lucide/vue";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
@@ -106,6 +107,12 @@ const HALIGN_OPTIONS = [
   { key: "start", label: "左" },
   { key: "center", label: "居中" },
   { key: "end", label: "右" },
+];
+
+/** 传输中心入口可见性（Files StatusCenterVisibility：始终 / 仅传输进行中） */
+const TRANSFER_VISIBILITY_OPTIONS = [
+  { key: "always", label: "始终显示" },
+  { key: "activeOnly", label: "仅传输进行中显示" },
 ];
 
 /** —— 字号步进（编辑器 11–20 / 终端 10–20） —— */
@@ -356,6 +363,21 @@ function stepFontSize(which: "editorFontSize" | "terminalFontSize", delta: numbe
           +
         </button>
       </div>
+    </div>
+
+    <!-- 传输中心入口可见性 -->
+    <div class="settings-card">
+      <ArrowDownUp :size="20" class="shrink-0 text-dim" />
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium">传输中心</p>
+        <p class="mt-0.5 text-xs text-dim">控制工具栏中传输中心入口的显示时机。</p>
+      </div>
+      <SettingsSelect
+        :model-value="s.transferCenterVisibility"
+        :options="TRANSFER_VISIBILITY_OPTIONS"
+        label="传输中心可见性"
+        @update:model-value="(key) => settings.update({ transferCenterVisibility: key as typeof s.transferCenterVisibility })"
+      />
     </div>
 
     <!-- 显示状态栏 -->

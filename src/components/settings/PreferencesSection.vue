@@ -4,6 +4,7 @@ import {
   ArrowUpFromLine,
   Binary,
   Eye,
+  FileText,
   MousePointerClick,
   TriangleAlert,
 } from "@lucide/vue";
@@ -41,6 +42,13 @@ const SIZE_UNIT_OPTIONS = [
   { key: "decimal", label: "十进制" },
 ];
 
+/** 删除确认三档（Files DeleteConfirmationPolicies；远端删除皆为永久删除，仅永久删除档行为同「总是」） */
+const DELETE_CONFIRM_OPTIONS = [
+  { key: "always", label: "始终显示确认对话框" },
+  { key: "permanentOnly", label: "仅永久删除时确认" },
+  { key: "never", label: "不显示确认对话框" },
+];
+
 /** 显示隐藏项：立即作用于当前浏览 */
 function setShowHidden(value: boolean) {
   settings.update({ showHidden: value });
@@ -68,6 +76,25 @@ function setShowHidden(value: boolean) {
         class="toggle-switch"
         :class="s.showHidden && 'on'"
         @click="setShowHidden(!s.showHidden)"
+      >
+        <span class="toggle-knob" />
+      </button>
+    </div>
+
+    <!-- 显示扩展名（Files HideFileExtension 反相；仅影响展示层，重命名仍操作完整文件名） -->
+    <div class="settings-card">
+      <FileText :size="20" class="shrink-0 text-dim" />
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium">显示文件扩展名</p>
+        <p class="mt-0.5 text-xs text-dim">关闭后文件名隐藏扩展名显示，重命名仍包含完整名称。</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        :aria-checked="s.showFileExtensions"
+        class="toggle-switch"
+        :class="s.showFileExtensions && 'on'"
+        @click="settings.update({ showFileExtensions: !s.showFileExtensions })"
       >
         <span class="toggle-knob" />
       </button>
@@ -132,22 +159,19 @@ function setShowHidden(value: boolean) {
   <!-- 行为 -->
   <p class="settings-group-title">行为</p>
   <div class="flex flex-col gap-1">
+    <!-- 删除确认三档（Files FoldersSettingsService.DeleteConfirmationPolicy 下拉） -->
     <div class="settings-card">
       <TriangleAlert :size="20" class="shrink-0 text-dim" />
       <div class="min-w-0 flex-1">
         <p class="text-sm font-medium">删除项目时显示确认对话框</p>
-        <p class="mt-0.5 text-xs text-dim">关闭后将直接删除，不再弹出确认框。</p>
+        <p class="mt-0.5 text-xs text-dim">远端删除无法撤销，关闭确认后删除立即执行。</p>
       </div>
-      <button
-        type="button"
-        role="switch"
-        :aria-checked="s.confirmDelete"
-        class="toggle-switch"
-        :class="s.confirmDelete && 'on'"
-        @click="settings.update({ confirmDelete: !s.confirmDelete })"
-      >
-        <span class="toggle-knob" />
-      </button>
+      <SettingsSelect
+        :model-value="s.deleteConfirmation"
+        :options="DELETE_CONFIRM_OPTIONS"
+        label="删除确认策略"
+        @update:model-value="(key) => settings.update({ deleteConfirmation: key as typeof s.deleteConfirmation })"
+      />
     </div>
 
     <div class="settings-card">

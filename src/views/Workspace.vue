@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { save } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   ClipboardCopy,
   ClipboardPaste,
   Copy,
@@ -15,6 +16,7 @@ import {
   FolderPlus,
   FolderTree,
   HardDrive,
+  History,
   House,
   Info,
   Lock,
@@ -55,7 +57,7 @@ import { useSettingsStore } from "@/stores/settings";
 import { useTerminalStore } from "@/stores/terminal";
 import { useTransferStore } from "@/stores/transfer";
 import type { FileEntry } from "@/types";
-import { copyText, joinPath, pathBaseName } from "@/utils/format";
+import { copyText, formatSize, joinPath, pathBaseName } from "@/utils/format";
 import {
   copyVirtualFiles,
   readClipboardFiles,
@@ -354,6 +356,72 @@ const quickLinks = [
   { label: "日志", path: "/var", icon: ScrollText },
 ];
 
+/** —— A2 后退按钮右键：历史飞出（Files BackHistoryFlyout，仅 Back 有；最近在上，点击直达） —— */
+const backHistoryMenu = ref<{ open: boolean; x: number; y: number }>({
+  open: false,
+  x: 0,
+  y: 0,
+});
+
+function onBackContextMenu(e: MouseEvent) {
+  if (!explorer.backHistory.length) return;
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  backHistoryMenu.value = { open: true, x: rect.left, y: rect.bottom + 2 };
+}
+
+const backHistoryItems = computed<MenuItem[]>(() =>
+  explorer.backHistory.map((h) => ({
+    key: String(h.index),
+    label: h.path,
+    icon: History,
+  })),
+);
+
+function onBackHistorySelect(key: string) {
+  backHistoryMenu.value.open = false;
+  explorer.navigateToHistory(Number(key));
+}
+
+/** —— A6 「下载到…」多选放开：右键项在多选集合内且集合全为文件时逐文件下载（文件夹仍置灰） —— */
+function downloadTargets(entry: FileEntry): FileEntry[] {
+  if (explorer.isSelected(entry.name) && explorer.selectedNames.size > 1) {
+    const files = [...explorer.selectedNames]
+      .map((n) => explorer.entryByName(n))
+      .filter((e): e is FileEntry => !!e);
+    if (files.every((e) => e.kind === "file")) return files;
+  }
+  return entry.kind === "file" ? [entry] : [];
+}
+
+async function downloadEntries(files: FileEntry[]) {
+  if (!files.length) return;
+  if (files.length === 1) {
+    const target = await save({ defaultPath: files[0].name });
+    if (!target) return;
+    const connectionId = connections.active?.connectionId;
+    if (connectionId) {
+      await transfers.startDownload(
+        connectionId,
+        joinPath(explorer.cwd, files[0].name),
+        target,
+      );
+    }
+    return;
+  }
+  // 多选：弹文件夹选择器，逐文件独立下载任务
+  const dir = await openDialog({ directory: true, multiple: false });
+  if (typeof dir !== "string") return;
+  const connectionId = connections.active?.connectionId;
+  if (!connectionId) return;
+  for (const f of files) {
+    await transfers.startDownload(
+      connectionId,
+      joinPath(explorer.cwd, f.name),
+      joinPath(dir, f.name),
+    );
+  }
+}
+
 /** 文件区滚动容器：进入新目录回顶部；原地刷新（文件操作后）保持滚动 */
 const fileAreaRef = ref<HTMLElement | null>(null);
 watch(
@@ -365,6 +433,20 @@ watch(
   },
 );
 
+
+/** A5 状态栏已选累计大小：仅文件计入（文件夹不计），遵循 sizeUnit 设置（StatusBar.xaml ItemSize） */
+const selectedSizeLabel = computed(() => {
+  let bytes = 0;
+  let hasFile = false;
+  for (const name of explorer.selectedNames) {
+    const entry = explorer.entryByName(name);
+    if (entry?.kind === "file") {
+      hasFile = true;
+      bytes += entry.size;
+    }
+  }
+  return hasFile ? formatSize(bytes) : "";
+});
 
 /** 文件区右键菜单状态 */
 const ctxMenu = ref<{ open: boolean; x: number; y: number; entry: FileEntry | null }>({
@@ -399,10 +481,11 @@ function openProperties(entry: FileEntry | null) {
 }
 
 /** 单条删除（右键菜单）或按当前多选批量（Delete 键）。
- *  设置关闭「删除前确认」时跳过对话框直接执行（Files ShowConfirmationWhenDeletingItems）。 */
+ *  删除确认策略（Files DeleteConfirmationPolicies）：never 直接执行；
+ *  always 恒弹；permanentOnly 仅永久删除时弹——远端删除皆为永久删除，行为同 always。 */
 function requestDelete(entry: FileEntry | null) {
   if (collectDeleteTargets(entry)) {
-    if (settings.settings.confirmDelete) return; // 弹确认框
+    if (settings.settings.deleteConfirmation !== "never") return; // 弹确认框
     confirmDelete();
   }
 }
@@ -485,8 +568,8 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
       key: "download",
       label: "下载到…",
       icon: Download,
-      // 目录/链接暂不支持（未递归、不跟随目标）
-      disabled: entry.kind !== "file",
+      // 单文件直接下；多选集合全为文件时放开逐个下载，含文件夹/链接仍置灰（未递归）
+      disabled: downloadTargets(entry).length === 0,
     },
     { key: "sep2", label: "", separator: true },
     { key: "rename", label: "重命名", icon: Pencil },
@@ -526,19 +609,10 @@ async function onCtxMenuSelect(key: string) {
       await copyText(joinPath(explorer.cwd, entry.name));
       break;
     case "download": {
-      // 目录/链接置灰，双保险再判一次
-      if (entry.kind !== "file") break;
-      const target = await save({ defaultPath: entry.name });
-      // 取消保存对话框返回 null
-      if (!target) break;
-      const connectionId = connections.active?.connectionId;
-      if (connectionId) {
-        await transfers.startDownload(
-          connectionId,
-          joinPath(explorer.cwd, entry.name),
-          target,
-        );
-      }
+      // 置灰态双保险（多选含文件夹/链接时不下载）
+      const files = downloadTargets(entry);
+      if (!files.length) break;
+      await downloadEntries(files);
       break;
     }
     case "rename":
@@ -598,7 +672,9 @@ const dragOver = ref(false);
 let unlistenDrag: UnlistenFn | null = null;
 
 /** F2 重命名、Delete 删除选中项、Ctrl+C/X/V 剪贴板；Alt+Enter 属性；
- *  Alt+↑ 上一级 / Alt+← 后退 / Alt+→ 前进 */
+ *  Alt+↑ 上一级 / Alt+← 后退 / Alt+→ 前进；
+ *  F5·Ctrl+R 刷新 / Backspace 上一级 / Ctrl+A 全选 / Ctrl+I 反选 /
+ *  Ctrl+Shift+C 复制路径 / Ctrl+Shift+N 新建文件夹 */
 function onKeydown(e: KeyboardEvent) {
   // 就地编辑/表单输入时快捷键让位
   if (
@@ -610,6 +686,15 @@ function onKeydown(e: KeyboardEvent) {
   // 悬浮窗（编辑器/终端）打开时让位
   if (editor.open || terminalStore.open) return;
   if (e.ctrlKey && (e.key === "c" || e.key === "C")) {
+    // Ctrl+Shift+C：复制选中项路径（Files CopyItemPathAction：多选换行连接，无选中复制当前目录）
+    if (e.shiftKey) {
+      e.preventDefault();
+      const paths = [...explorer.selectedNames].map((n) =>
+        joinPath(explorer.cwd, n),
+      );
+      void copyText(paths.length ? paths.join("\n") : explorer.cwd);
+      return;
+    }
     e.preventDefault();
     void copySelectionToClipboard();
     return;
@@ -625,6 +710,31 @@ function onKeydown(e: KeyboardEvent) {
     void pasteFromClipboard(e.shiftKey);
     return;
   }
+  if (e.ctrlKey && (e.key === "r" || e.key === "R")) {
+    e.preventDefault();
+    explorer.refresh();
+    return;
+  }
+  if (e.ctrlKey && (e.key === "a" || e.key === "A")) {
+    e.preventDefault();
+    explorer.selectAll();
+    return;
+  }
+  if (e.ctrlKey && (e.key === "i" || e.key === "I")) {
+    e.preventDefault();
+    explorer.invertSelection();
+    return;
+  }
+  if (e.ctrlKey && e.shiftKey && (e.key === "n" || e.key === "N")) {
+    e.preventDefault();
+    explorer.startCreate("dir");
+    return;
+  }
+  if (e.key === "F5") {
+    e.preventDefault();
+    explorer.refresh();
+    return;
+  }
   if (e.key === "F2" && explorer.selectedNames.size === 1) {
     e.preventDefault();
     explorer.startRename([...explorer.selectedNames][0]);
@@ -633,6 +743,11 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === "Delete" && explorer.selectedNames.size > 0) {
     e.preventDefault();
     requestDelete(null);
+    return;
+  }
+  if (e.key === "Backspace" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    e.preventDefault();
+    explorer.up();
     return;
   }
   if (!e.altKey) return;
@@ -702,9 +817,10 @@ function onKeydown(e: KeyboardEvent) {
           type="button"
           class="btn-icon"
           :disabled="!explorer.canBack || explorer.loading"
-          title="后退（Alt+←）"
+          title="后退（Alt+←，右键查看历史）"
           aria-label="后退"
           @click="explorer.back()"
+          @contextmenu.prevent="onBackContextMenu"
         >
           <ArrowLeft :size="16" />
         </button>
@@ -717,6 +833,16 @@ function onKeydown(e: KeyboardEvent) {
           @click="explorer.forward()"
         >
           <ArrowRight :size="16" />
+        </button>
+        <button
+          type="button"
+          class="btn-icon"
+          :disabled="explorer.cwd === '/' || explorer.loading"
+          title="上一级（Alt+↑）"
+          aria-label="上一级"
+          @click="explorer.up()"
+        >
+          <ArrowUp :size="16" />
         </button>
         <button
           type="button"
@@ -869,7 +995,10 @@ function onKeydown(e: KeyboardEvent) {
     >
       <span>
         {{ explorer.visibleEntries.length }} 个项目
-        <span v-if="explorer.selectedNames.size">· 已选择 {{ explorer.selectedNames.size }} 项</span>
+        <span v-if="explorer.selectedNames.size">
+          · 已选择 {{ explorer.selectedNames.size }} 项
+          <template v-if="selectedSizeLabel">· 共 {{ selectedSizeLabel }}</template>
+        </span>
       </span>
       <span class="flex min-w-0 items-baseline gap-3">
         <span class="flex min-w-0 items-baseline gap-1.5" :title="`${connections.active.profile.username}@${connections.active.profile.host}`">
@@ -891,6 +1020,16 @@ function onKeydown(e: KeyboardEvent) {
       :items="ctxMenuItems"
       @select="onCtxMenuSelect"
       @close="ctxMenu.open = false"
+    />
+
+    <!-- 后退历史飞出（Files BackHistoryFlyout：仅 Back 有，最近在上，点击直达） -->
+    <ContextMenu
+      :open="backHistoryMenu.open"
+      :x="backHistoryMenu.x"
+      :y="backHistoryMenu.y"
+      :items="backHistoryItems"
+      @select="onBackHistorySelect"
+      @close="backHistoryMenu.open = false"
     />
 
     <!-- 删除确认：远程删除不可恢复，红色主按钮 -->

@@ -49,6 +49,8 @@ export const useExplorerStore = defineStore("explorer", () => {
   const newDraft = ref<"dir" | "file" | null>(null);
   /** 文件操作进行中（防重入，右键菜单/快捷键据此置灰） */
   const opPending = ref(false);
+  /** 返回上级后待定位选中的条目名（ScrollToPreviousFolderWhenNavigatingUp；FileTable 滚动到位后置回 null） */
+  const selectAfterLoad = ref<string | null>(null);
 
   const canBack = computed(() => historyIndex.value > 0);
   const canForward = computed(
@@ -70,9 +72,16 @@ export const useExplorerStore = defineStore("explorer", () => {
         history.value = [...history.value.slice(0, historyIndex.value + 1), path];
         historyIndex.value = history.value.length - 1;
       }
+      // 返回上级：定位并选中原目录行（滚动由 FileTable 处理）
+      const pending = selectAfterLoad.value;
+      if (pending) {
+        if (entries.value.some((e) => e.name === pending)) selectOnly(pending);
+        else selectAfterLoad.value = null;
+      }
     } catch (e) {
       // 失败时保留旧目录内容，仅呈现错误横幅
       error.value = e instanceof Error ? e.message : String(e);
+      selectAfterLoad.value = null;
     } finally {
       viaHistory = false;
       loading.value = false;
@@ -106,6 +115,22 @@ export const useExplorerStore = defineStore("explorer", () => {
     void open(history.value[historyIndex.value]);
   }
 
+  /** 后退历史飞出直达：跳到指定历史位置（该位置之后的路径出栈） */
+  function navigateToHistory(index: number) {
+    if (loading.value || index < 0 || index >= history.value.length) return;
+    viaHistory = true;
+    historyIndex.value = index;
+    void open(history.value[index]);
+  }
+
+  /** 后退可达的历史路径（当前索引之前，最近在上） */
+  const backHistory = computed(() =>
+    history.value
+      .slice(0, historyIndex.value)
+      .map((path, i) => ({ path, index: i }))
+      .reverse(),
+  );
+
   function enter(name: string) {
     if (!loading.value) void open(joinPath(cwd.value, name));
   }
@@ -115,7 +140,11 @@ export const useExplorerStore = defineStore("explorer", () => {
   }
 
   function up() {
-    if (cwd.value !== "/" && !loading.value) void open(parentPath(cwd.value));
+    if (cwd.value !== "/" && !loading.value) {
+      // 返回上级后定位选中原目录（ScrollToPreviousFolderWhenNavigatingUp，默认开启）
+      selectAfterLoad.value = cwd.value.split("/").filter(Boolean).pop() ?? null;
+      void open(parentPath(cwd.value));
+    }
   }
 
   function entryByName(name: string | null): FileEntry | null {
@@ -348,6 +377,23 @@ export const useExplorerStore = defineStore("explorer", () => {
     anchorName = null;
   }
 
+  /** 全选（Ctrl+A）：按当前过滤后的可见集合 */
+  function selectAll() {
+    const names = visibleEntries.value.map((e) => e.name);
+    selectedNames.value = new Set(names);
+    anchorName = names.length ? names[names.length - 1] : null;
+  }
+
+  /** 反选（Ctrl+I，Files InvertSelectionAction）：可见集合内取补集 */
+  function invertSelection() {
+    const inverted = visibleEntries.value
+      .map((e) => e.name)
+      .filter((n) => !selectedNames.value.has(n));
+    selectedNames.value = new Set(inverted);
+    // 锚点移出集合时清除，避免下一次 Shift 范围从不可见锚点起算
+    if (anchorName && !inverted.includes(anchorName)) anchorName = null;
+  }
+
   function isSelected(name: string): boolean {
     return selectedNames.value.has(name);
   }
@@ -390,14 +436,17 @@ export const useExplorerStore = defineStore("explorer", () => {
     renamingName,
     newDraft,
     opPending,
+    selectAfterLoad,
     canBack,
     canForward,
+    backHistory,
     visibleEntries,
     breadcrumbSegments,
     open,
     reloadPreserve,
     back,
     forward,
+    navigateToHistory,
     enter,
     refresh,
     up,
@@ -409,6 +458,8 @@ export const useExplorerStore = defineStore("explorer", () => {
     selectRange,
     applyRubberSelection,
     clearSelection,
+    selectAll,
+    invertSelection,
     isSelected,
     deleteEntries,
     sortBy,

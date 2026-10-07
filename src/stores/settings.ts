@@ -15,6 +15,10 @@ export type ImageFit = "none" | "fill" | "uniform" | "uniformToFill";
 export type ImageAlign = "start" | "center" | "end";
 /** 冲突解决策略（Files ConflictsResolveOption 的 newName/replace/skip；custom 仅对话框内聚合态，不持久化） */
 export type ConflictResolveOption = "newName" | "replace" | "skip";
+/** 删除确认策略（Files DeleteConfirmationPolicies：总是 / 仅永久删除 / 从不） */
+export type DeleteConfirmationPolicy = "always" | "permanentOnly" | "never";
+/** 传输中心入口可见性（Files StatusCenterVisibility：始终 / 仅传输进行中） */
+export type TransferCenterVisibility = "always" | "activeOnly";
 
 const STORAGE_KEY = "visualssh:settings:v1";
 
@@ -29,8 +33,8 @@ export interface AppSettings {
   defaultSortDesc: boolean;
   /** 排序优先级（Files SortPriority；原 dirFirst 硬编码改为可配置） */
   sortPriority: SortPriority;
-  /** 删除前弹确认框（Files ShowConfirmationWhenDeletingItems） */
-  confirmDelete: boolean;
+  /** 删除确认策略（Files DeleteConfirmationPolicies；旧布尔键 confirmDelete 迁移 true→always / false→never） */
+  deleteConfirmation: DeleteConfirmationPolicy;
   /** 大小格式（Files SizeUnitTypes） */
   sizeUnit: SizeUnit;
   /** 单击即打开（Files SingleClickToOpen，桌面端简化为开/关） */
@@ -53,6 +57,10 @@ export interface AppSettings {
   bgImageHAlign: ImageAlign;
   /** 冲突对话框「应用到所有」记住的上次策略（Files GeneralSettingsService.ConflictsResolveOption，默认生成新名称） */
   conflictsResolveOption: ConflictResolveOption;
+  /** 传输中心入口可见性（Files StatusCenterVisibility，默认始终显示） */
+  transferCenterVisibility: TransferCenterVisibility;
+  /** 显示文件扩展名（Files HideFileExtension 反相，默认显示；仅影响展示层，重命名仍操作完整名） */
+  showFileExtensions: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -63,7 +71,7 @@ const DEFAULTS: AppSettings = {
   defaultSortKey: "name",
   defaultSortDesc: false,
   sortPriority: "folders",
-  confirmDelete: true,
+  deleteConfirmation: "always",
   sizeUnit: "binary",
   singleClickOpen: false,
   dblClickBlankGoUp: false,
@@ -75,6 +83,8 @@ const DEFAULTS: AppSettings = {
   bgImageVAlign: "center",
   bgImageHAlign: "center",
   conflictsResolveOption: "newName",
+  transferCenterVisibility: "always",
+  showFileExtensions: true,
 };
 
 function load(): AppSettings {
@@ -88,7 +98,15 @@ function load(): AppSettings {
       }
       return { ...DEFAULTS };
     }
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<AppSettings>) };
+    const parsed = { ...(JSON.parse(raw) as Partial<AppSettings>) };
+    // 旧版布尔删除确认 → 三档策略（true→总是确认 / false→从不确认）
+    if ("confirmDelete" in parsed && !("deleteConfirmation" in parsed)) {
+      parsed.deleteConfirmation = (parsed as { confirmDelete?: boolean }).confirmDelete
+        ? "always"
+        : "never";
+    }
+    delete (parsed as Partial<AppSettings> & { confirmDelete?: boolean }).confirmDelete;
+    return { ...DEFAULTS, ...parsed };
   } catch {
     return { ...DEFAULTS };
   }

@@ -10,10 +10,11 @@ import {
   MoreHorizontal,
   X,
 } from "@lucide/vue";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 import ContextMenu from "@/components/common/ContextMenu.vue";
 import type { MenuItem } from "@/components/common/DropdownMenu.vue";
+import { useSettingsStore } from "@/stores/settings";
 import { useTransferStore, type TransferRow } from "@/stores/transfer";
 import { formatEta, formatSize, formatSpeed } from "@/utils/format";
 
@@ -25,7 +26,20 @@ import { formatEta, formatSize, formatSpeed } from "@/utils/format";
  * chevron 展开 88px 速度折线 + 头部「清除已完成」。
  */
 const transfers = useTransferStore();
+const settings = useSettingsStore();
 const open = ref(false);
+
+/** 可见性（Files StatusCenterVisibility，NavigationToolbarViewModel.cs:79-80 同款判断）：
+ *  always 恒显；activeOnly 仅传输进行中显示（空闲隐藏入口） */
+const entryVisible = computed(
+  () =>
+    settings.settings.transferCenterVisibility === "always" ||
+    transfers.activeCount > 0,
+);
+// 入口隐藏时收起浮层，避免恢复可见时残留展开态
+watch(entryVisible, (visible) => {
+  if (!visible) open.value = false;
+});
 
 /** 展开速度折线的行 */
 const expandedIds = ref<Set<string>>(new Set());
@@ -176,7 +190,7 @@ function onCancelMenuSelect(key: string) {
 </script>
 
 <template>
-  <div class="relative">
+  <div v-if="entryVisible" class="relative">
     <!-- 点击外部关闭 -->
     <div v-if="open" class="fixed inset-0 z-40" @click="open = false" />
 

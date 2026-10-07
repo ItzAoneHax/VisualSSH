@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ChevronDown, ChevronUp, File, Folder, Link2, SearchX } from "@lucide/vue";
-import { ref, watch } from "vue";
+import { nextTick, ref, watch } from "vue";
 
 import { useClipboardStore } from "@/stores/clipboard";
 import { useExplorerStore, type SortKey } from "@/stores/explorer";
@@ -11,6 +11,26 @@ import { formatMtime, formatSize, kindLabel } from "@/utils/format";
 const explorer = useExplorerStore();
 const settings = useSettingsStore();
 const clip = useClipboardStore();
+
+/** 显示扩展名关闭时，名称单元格展示层去扩展名（点开头文件视为无扩展名不裁剪）；重命名仍操作完整名 */
+function displayName(entry: FileEntry): string {
+  if (settings.settings.showFileExtensions) return entry.name;
+  const dot = entry.name.lastIndexOf(".");
+  return dot > 0 ? entry.name.slice(0, dot) : entry.name;
+}
+
+/** 返回上级后滚动定位选中的原目录行（ScrollToPreviousFolderWhenNavigatingUp） */
+watch(
+  () => explorer.selectAfterLoad,
+  (name) => {
+    if (!name) return;
+    void nextTick(() => {
+      const row = document.querySelector(`[data-row="${CSS.escape(name)}"]`);
+      row?.scrollIntoView({ block: "nearest" });
+      explorer.selectAfterLoad = null;
+    });
+  },
+);
 
 /** 剪切中的行变暗（Files DimItemOpacity 0.4，TransferHelpers.cs:125-132） */
 function isCutRow(entry: FileEntry): boolean {
@@ -331,7 +351,11 @@ function onContainerPointerDown(e: PointerEvent) {
               @keydown.esc.prevent.stop="explorer.cancelEdit()"
               @blur="explorer.cancelEdit()"
             />
-            <span v-else class="truncate pl-1.5">{{ entry.name }}</span>
+            <span
+              v-else
+              class="truncate pl-1.5"
+              :title="explorer.renamingName === entry.name || settings.settings.showFileExtensions ? undefined : entry.name"
+            >{{ displayName(entry) }}</span>
           </span>
           <!-- 列内容：caption 12、次级文字（ColumnContentTextBlock opacity .6） -->
           <span class="truncate pl-2.5 text-xs text-dim">{{ formatMtime(entry.mtime) }}</span>
