@@ -15,9 +15,11 @@ import { EditorView, keymap } from "@codemirror/view";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 import MarkdownIt from "markdown-it";
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import Modal from "@/components/common/Modal.vue";
+import EditorSearchWidget from "@/components/workspace/EditorSearchWidget.vue";
+import { createEditorSearch } from "@/composables/editorSearch";
 import { useEditorStore } from "@/stores/editor";
 import { useSettingsStore } from "@/stores/settings";
 
@@ -29,6 +31,9 @@ import { useSettingsStore } from "@/stores/settings";
  */
 
 const editor = useEditorStore();
+
+/** 自绘查找/替换（G2）：状态与官方命令桥接，UI 为视口右上角悬浮卡 */
+const search = createEditorSearch();
 
 /** 窗体尺寸（px）；拖拽期间关闭过渡 */
 const size = ref({
@@ -88,6 +93,13 @@ const cmTheme = EditorView.theme({
     backgroundColor: "color-mix(in srgb, var(--accent) 25%, transparent)",
   },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--accent)" },
+  ".cm-searchMatch": {
+    backgroundColor: "color-mix(in srgb, var(--accent) 20%, transparent)",
+    borderRadius: "2px",
+  },
+  ".cm-searchMatch-selected": {
+    backgroundColor: "color-mix(in srgb, var(--accent) 45%, transparent)",
+  },
 });
 
 /** 按扩展名懒加载语言包（Vite 自动分包） */
@@ -177,6 +189,7 @@ function buildExtensions(): Extension[] {
     EditorView.updateListener.of((v) => {
       if (v.docChanged) editor.setContent(v.state.doc.toString());
     }),
+    ...search.buildExtensions(),
   ];
 }
 
@@ -188,6 +201,7 @@ async function mountEditor() {
     state: EditorState.create({ doc: editor.doc, extensions: buildExtensions() }),
     parent: host.value,
   });
+  search.attach(view);
   void loadLanguage();
 }
 
@@ -209,6 +223,7 @@ async function loadLanguage() {
 }
 
 function destroyEditor() {
+  search.attach(null);
   view?.destroy();
   view = null;
 }
@@ -324,6 +339,24 @@ function discardAndClose() {
   confirmClose.value = false;
   editor.closeNow();
 }
+
+/** 悬浮窗级 Ctrl+F / Ctrl+H（window 捕获）：md 预览态先切回源码再打开自绘查找卡。
+ *  编辑器聚焦时的 Mod-f/Mod-h 走 CodeMirror keymap（editorSearch.ts），此处覆盖
+ *  焦点在输入框/预览/标题栏的场景 */
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (!editor.open) return;
+  if (!e.ctrlKey && !e.metaKey) return;
+  if (e.shiftKey || e.altKey) return;
+  const key = e.key.toLowerCase();
+  if (key !== "f" && key !== "h") return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (editor.previewMode === "preview") editor.setPreviewMode("source");
+  search.openSearch(key === "h");
+}
+
+onMounted(() => window.addEventListener("keydown", onGlobalKeydown, true));
+onBeforeUnmount(() => window.removeEventListener("keydown", onGlobalKeydown, true));
 </script>
 
 <template>
@@ -492,6 +525,12 @@ function discardAndClose() {
         v-show="!editor.loading && !editor.unsupported && editor.previewMode === 'source'"
         ref="host"
         class="h-full"
+      />
+
+      <!-- 查找/替换悬浮卡（G2）：仅源码态显示 -->
+      <EditorSearchWidget
+        v-show="!editor.loading && !editor.unsupported && editor.previewMode === 'source'"
+        :search="search"
       />
 
       <!-- 右下角拖拽调整大小 -->
