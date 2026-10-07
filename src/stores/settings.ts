@@ -63,6 +63,8 @@ export interface AppSettings {
   showFileExtensions: boolean;
   /** 详情视图行高密度（Files DetailsViewSizeKind：28/36/40/44/48，默认小 36） */
   detailsRowHeight: number;
+  /** 恢复上次浏览目录（每连接记忆 lastDir；Files 会话恢复的每连接简化版） */
+  restoreLastDir: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -88,6 +90,7 @@ const DEFAULTS: AppSettings = {
   transferCenterVisibility: "always",
   showFileExtensions: true,
   detailsRowHeight: 36,
+  restoreLastDir: true,
 };
 
 function load(): AppSettings {

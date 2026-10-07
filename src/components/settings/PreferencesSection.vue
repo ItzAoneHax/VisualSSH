@@ -5,6 +5,7 @@ import {
   Binary,
   Eye,
   FileText,
+  History as HistoryIcon,
   MousePointerClick,
   TriangleAlert,
 } from "@lucide/vue";
@@ -184,6 +185,24 @@ function setShowHidden(value: boolean) {
         label="删除确认策略"
         @update:model-value="(key) => settings.update({ deleteConfirmation: key as typeof s.deleteConfirmation })"
       />
+    </div>
+
+    <div class="settings-card">
+      <HistoryIcon :size="20" class="shrink-0 text-dim" />
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium">恢复上次浏览目录</p>
+        <p class="mt-0.5 text-xs text-dim">连接后自动进入该服务器上次浏览的目录（目录已失效时回退默认目录）。</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        :aria-checked="s.restoreLastDir"
+        class="toggle-switch"
+        :class="s.restoreLastDir && 'on'"
+        @click="settings.update({ restoreLastDir: !s.restoreLastDir })"
+      >
+        <span class="toggle-knob" />
+      </button>
     </div>
 
     <div class="settings-card">

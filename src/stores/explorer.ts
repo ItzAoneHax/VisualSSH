@@ -79,6 +79,30 @@ function loadSearchHistory(): string[] {
   }
 }
 
+/** 每连接上次浏览目录（visualssh:session:v1：map profileId → lastDir） */
+const SESSION_KEY = "visualssh:session:v1";
+
+function loadLastDirs(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLastDir(profileId: string, dir: string) {
+  if (!profileId) return;
+  try {
+    const map = loadLastDirs();
+    map[profileId] = dir;
+    localStorage.setItem(SESSION_KEY, JSON.stringify(map));
+  } catch {
+    // 隐私模式：跳过
+  }
+}
+
 /**
  * 远程文件浏览器状态（单工作区）。
  * 含浏览历史栈，支持资源管理器语义的后退/前进。
@@ -163,6 +187,8 @@ export const useExplorerStore = defineStore("explorer", () => {
     try {
       entries.value = await listDir(connectionId.value, path);
       cwd.value = path;
+      // 记录每连接上次浏览目录（AppLifecycleHelper.SaveSessionTabs 的每连接简化版）
+      saveLastDir(profileId.value, path);
       // 刷新（同路径）不入历史栈，避免后退在相同目录间空转
       if (!viaHistory && path !== history.value[historyIndex.value]) {
         history.value = [...history.value.slice(0, historyIndex.value + 1), path];
@@ -343,7 +369,8 @@ export const useExplorerStore = defineStore("explorer", () => {
     void runOp(() => chmodSsh(connectionId.value, joinPath(cwd.value, name), mode));
   }
 
-  function reset(nextConnectionId: string, rootPath: string, nextProfileId = "") {
+  /** 连接建立：优先恢复该 profile 上次浏览目录（设置可关），listDir 失败回退默认目录 */
+  async function reset(nextConnectionId: string, rootPath: string, nextProfileId = "") {
     connectionId.value = nextConnectionId;
     profileId.value = nextProfileId;
     cwd.value = rootPath;
@@ -361,7 +388,17 @@ export const useExplorerStore = defineStore("explorer", () => {
     historyIndex.value = -1;
     viaHistory = false;
     selectAfterLoad.value = null;
-    void open(rootPath);
+    const lastDir = s.restoreLastDir ? loadLastDirs()[nextProfileId] : null;
+    if (lastDir && lastDir !== rootPath) {
+      await open(lastDir);
+      if (error.value) {
+        // 上次目录已失效（被删/无权限）：回退默认目录并清掉错误横幅
+        error.value = null;
+        await open(rootPath);
+      }
+    } else {
+      await open(rootPath);
+    }
   }
 
   function clear() {

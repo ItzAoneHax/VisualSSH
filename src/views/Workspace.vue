@@ -12,6 +12,7 @@ import {
   Download,
   Eye,
   FilePlus,
+  Folder,
   FolderOpen,
   FolderPlus,
   FolderSearch,
@@ -22,6 +23,8 @@ import {
   Info,
   Lock,
   Pencil,
+  Pin,
+  PinOff,
   RefreshCw,
   Scissors,
   ScrollText,
@@ -55,6 +58,7 @@ import { useClipboardStore } from "@/stores/clipboard";
 import { useConflictStore, type IncomingItem } from "@/stores/conflicts";
 import { useEditorStore } from "@/stores/editor";
 import { useExplorerStore } from "@/stores/explorer";
+import { usePinnedStore } from "@/stores/pinned";
 import { useSettingsStore } from "@/stores/settings";
 import { useTerminalStore } from "@/stores/terminal";
 import { useTransferStore } from "@/stores/transfer";
@@ -375,13 +379,43 @@ async function fallbackCopyViaTemp(
   await transfers.startUpload(connectionId, local, targetDir, name);
 }
 
-/** Files 快速跳转（对应侧栏驱动器/常用位置区） */
-const quickLinks = [
-  { label: "根目录", path: "/", icon: HardDrive },
-  { label: "主目录", path: "/home", icon: House },
-  { label: "系统配置", path: "/etc", icon: FolderTree },
-  { label: "日志", path: "/var", icon: ScrollText },
-];
+/** Files 快速跳转 → 按 profile 固定的侧栏收藏（PinFolderToSidebarAction 语义） */
+const pinnedStore = usePinnedStore();
+
+/** 收藏图标键 → lucide 组件（新固定的默认 Folder） */
+const PIN_ICONS = {
+  hardDrive: HardDrive,
+  house: House,
+  folderTree: FolderTree,
+  scrollText: ScrollText,
+  folder: Folder,
+} as const;
+
+const pinnedFolders = computed(() =>
+  pinnedStore.pinsFor(connections.active?.profile.id ?? ""),
+);
+
+/** 侧栏项右键菜单（打开/取消固定） */
+const pinMenu = ref<{ open: boolean; x: number; y: number; path: string } | null>(null);
+
+function onPinContextMenu(folder: { path: string }, e: MouseEvent) {
+  pinMenu.value = { open: true, x: e.clientX, y: e.clientY, path: folder.path };
+}
+
+const pinMenuItems = computed<MenuItem[]>(() => [
+  { key: "open", label: "打开", icon: FolderOpen },
+  { key: "sepP", label: "", separator: true },
+  { key: "unpin", label: "取消固定", icon: PinOff },
+]);
+
+function onPinMenuSelect(key: string) {
+  const menu = pinMenu.value;
+  pinMenu.value = null;
+  if (!menu) return;
+  const profileId = connections.active?.profile.id;
+  if (key === "open") explorer.open(menu.path);
+  else if (key === "unpin" && profileId) pinnedStore.unpin(profileId, menu.path);
+}
 
 /** —— A2 后退按钮右键：历史飞出（Files BackHistoryFlyout，仅 Back 有；最近在上，点击直达） —— */
 const backHistoryMenu = ref<{ open: boolean; x: number; y: number }>({
@@ -615,6 +649,15 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
   const items: MenuItem[] = [];
   if (entry.kind === "dir") {
     items.push({ key: "open", label: "打开", icon: FolderOpen });
+    // 固定到侧栏（PinFolderToSidebarAction；已固定显示取消固定）
+    const folderPath = joinPath(explorer.cwd, entry.name);
+    const profileId = connections.active?.profile.id;
+    const pinned = profileId ? pinnedStore.isPinned(profileId, folderPath) : false;
+    items.push({
+      key: "pin",
+      label: pinned ? "取消固定" : "固定到侧栏",
+      icon: pinned ? PinOff : Pin,
+    });
     items.push({ key: "sep", label: "", separator: true });
   }
   items.push(
@@ -672,6 +715,17 @@ async function onCtxMenuSelect(key: string) {
     case "open":
       explorer.enter(entry.name);
       break;
+    case "pin": {
+      const profileId = connections.active?.profile.id;
+      if (!profileId) break;
+      const folderPath = joinPath(explorer.cwd, entry.name);
+      if (pinnedStore.isPinned(profileId, folderPath)) {
+        pinnedStore.unpin(profileId, folderPath);
+      } else {
+        pinnedStore.pin(profileId, { name: entry.name, path: folderPath });
+      }
+      break;
+    }
     case "cut":
       cutSelectionToClipboard(entry);
       break;
@@ -863,15 +917,17 @@ function onKeydown(e: KeyboardEvent) {
 
           <p class="mt-4 mb-1 px-2.5 text-xs font-medium text-faint">此服务器</p>
           <button
-            v-for="link in quickLinks"
+            v-for="link in pinnedFolders"
             :key="link.path"
             type="button"
             class="nav-item"
             :class="explorer.cwd === link.path && 'active'"
+            :title="link.path"
             @click="explorer.open(link.path)"
+            @contextmenu.prevent="onPinContextMenu(link, $event)"
           >
-            <component :is="link.icon" :size="16" class="ml-1 shrink-0" />
-            <span class="ml-3 truncate">{{ link.label }}</span>
+            <component :is="PIN_ICONS[link.icon]" :size="16" class="ml-1 shrink-0" />
+            <span class="ml-3 truncate">{{ link.name }}</span>
           </button>
         </nav>
 
@@ -1185,6 +1241,16 @@ function onKeydown(e: KeyboardEvent) {
       :items="backHistoryItems"
       @select="onBackHistorySelect"
       @close="backHistoryMenu.open = false"
+    />
+
+    <!-- 侧栏收藏项右键菜单（打开/取消固定） -->
+    <ContextMenu
+      :open="!!pinMenu?.open"
+      :x="pinMenu?.x ?? 0"
+      :y="pinMenu?.y ?? 0"
+      :items="pinMenuItems"
+      @select="onPinMenuSelect"
+      @close="pinMenu = null"
     />
 
     <!-- 删除确认：远程删除不可恢复，红色主按钮 -->
