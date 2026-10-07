@@ -321,6 +321,23 @@ pub async fn ssh_write_file(
         .map_err(|_| Error::Timeout)?
 }
 
+/// 在远端 shell 执行命令（内部复制/移动用），收集 stdout/stderr/退出码。
+#[tauri::command]
+pub async fn ssh_exec(
+    connection_id: String,
+    program: String,
+    args: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::ssh::ExecOutput> {
+    let handle = state
+        .get(&connection_id)
+        .ok_or_else(|| Error::NoSession(connection_id.clone()))?;
+    let session = handle.session.lock().await;
+    tokio::time::timeout(IO_TIMEOUT, session.exec(&program, &args))
+        .await
+        .map_err(|_| Error::Timeout)?
+}
+
 /// 断开并移除会话池中的连接；同时取消该连接的全部传输/统计并关闭其全部终端。
 #[tauri::command]
 pub async fn ssh_disconnect(

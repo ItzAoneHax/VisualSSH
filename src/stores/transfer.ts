@@ -11,7 +11,7 @@ import {
 import { joinPath } from "@/utils/format";
 
 export type TransferStatus = "queued" | "running" | "done" | "failed" | "cancelled";
-export type TransferDirection = "upload" | "download";
+export type TransferDirection = "upload" | "download" | "remote-copy" | "remote-move";
 
 /** 面板行（speedHistory 为速度折线采样，最新在末尾） */
 export interface TransferRow {
@@ -56,6 +56,17 @@ function remoteBaseName(path: string): string {
  * 传输中心状态：行数据全部由后端 transfer://progress 事件驱动；
  * 动作（上传/下载/取消/清除）只发起命令，不本地乐观改状态。
  */
+/** 远端操作句柄：前端编排批次，isCancelled 控制逐项停止 */
+export interface RemoteOpHandle {
+  id: string;
+  isCancelled: () => boolean;
+  setDone: () => void;
+  setFailed: (error: string) => void;
+}
+
+/** 远端批次取消函数登记（取消即停止批次剩余项） */
+const remoteOpCancels = new Map<string, () => void>();
+
 export const useTransferStore = defineStore("transfer", () => {
   /** 最新在前 */
   const rows = ref<TransferRow[]>([]);
@@ -245,6 +256,69 @@ export const useTransferStore = defineStore("transfer", () => {
     return status === "queued" || status === "running";
   }
 
+  /**
+   * 远端内部复制/移动卡片（Files StatusCenterHelper.AddCard_Copy/AddCard_Move 的
+   * 文案模式）：不定进度，取消 = 停止批次剩余项；完成/失败留结果卡。
+   */
+  async function startRemoteOp(
+    kind: "remote-copy" | "remote-move",
+    itemCount: number,
+    targetDir: string,
+  ): Promise<RemoteOpHandle> {
+    const id = crypto.randomUUID();
+    const verb = kind === "remote-copy" ? "复制" : "移动";
+    const runningTitle = `正在${verb} ${itemCount} 个项目到 ${targetDir}`;
+    const doneTitle = `已${verb} ${itemCount} 个项目到 ${targetDir}`;
+    rows.value.unshift({
+      id,
+      direction: kind,
+      fileName: runningTitle,
+      bytes: 0,
+      total: 0,
+      speedBps: 0,
+      status: "running",
+      speedHistory: [],
+    });
+    let cancelled = false;
+    remoteOpCancels.set(id, () => {
+      cancelled = true;
+    });
+    const rowOf = () => rows.value.find((r) => r.id === id);
+    const terminal = () => {
+      const status = rowOf()?.status;
+      return status === "done" || status === "failed" || status === "cancelled";
+    };
+    return {
+      id,
+      isCancelled: () => cancelled,
+      setDone: () => {
+        const row = rowOf();
+        if (row && !terminal()) {
+          row.status = "done";
+          row.fileName = doneTitle;
+        }
+      },
+      setFailed: (error: string) => {
+        const row = rowOf();
+        if (row && !terminal()) {
+          row.status = "failed";
+          row.fileName = `无法${verb} ${itemCount} 个项目到 ${targetDir}`;
+          row.error = error;
+        }
+      },
+    };
+  }
+
+  /** 取消远端批次（卡片置已取消，编排循环在下一项前停止） */
+  function cancelRemoteOp(id: string) {
+    remoteOpCancels.get(id)?.();
+    remoteOpCancels.delete(id);
+    const row = rows.value.find((r) => r.id === id);
+    if (row && row.status === "running") {
+      row.status = "cancelled";
+    }
+  }
+
   return {
     rows,
     activeCount,
@@ -254,6 +328,8 @@ export const useTransferStore = defineStore("transfer", () => {
     startUpload,
     startDownload,
     startDownloadTo,
+    startRemoteOp,
+    cancelRemoteOp,
     waitAllDone,
     cancel,
     removeRow,

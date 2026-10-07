@@ -2,6 +2,7 @@
 import { ChevronDown, ChevronUp, File, Folder, Link2, SearchX } from "@lucide/vue";
 import { ref, watch } from "vue";
 
+import { useClipboardStore } from "@/stores/clipboard";
 import { useExplorerStore, type SortKey } from "@/stores/explorer";
 import { useSettingsStore } from "@/stores/settings";
 import type { FileEntry } from "@/types";
@@ -9,6 +10,12 @@ import { formatMtime, formatSize, kindLabel } from "@/utils/format";
 
 const explorer = useExplorerStore();
 const settings = useSettingsStore();
+const clip = useClipboardStore();
+
+/** 剪切中的行变暗（Files DimItemOpacity 0.4，TransferHelpers.cs:125-132） */
+function isCutRow(entry: FileEntry): boolean {
+  return clip.isCut(explorer.connectionId, explorer.cwd, entry.name);
+}
 
 /** 单击打开（Files SingleClickToOpen）：无修饰键单击直接进入/打开 */
 function openEntry(entry: FileEntry) {
@@ -280,11 +287,12 @@ function onContainerPointerDown(e: PointerEvent) {
           :key="entry.name"
           class="relative grid cursor-default grid-cols-[minmax(0,1fr)_10rem_6rem_6rem_7rem] items-center rounded-[4px] px-3 text-sm transition-colors"
           :style="{ height: '36px' }"
-          :class="
+          :class="[
             explorer.isSelected(entry.name)
               ? 'bg-row-active hover:bg-row-active-hover'
-              : 'hover:bg-row-hover'
-          "
+              : 'hover:bg-row-hover',
+            isCutRow(entry) && 'opacity-40',
+          ]"
           role="row"
           :data-row="entry.name"
           :aria-selected="explorer.isSelected(entry.name)"

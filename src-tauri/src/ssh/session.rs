@@ -4,9 +4,11 @@ use std::time::Duration;
 
 use russh::client::{self, Handle};
 use russh::keys::{HashAlg, PrivateKeyWithHashAlg};
+use russh::ChannelMsg;
 use russh_sftp::client::fs::File as RemoteFile;
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::{FileAttributes, OpenFlags};
+use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::fs::{self, FileEntry};
@@ -235,6 +237,57 @@ impl SshSession {
             .map_err(|e| Error::Sftp(format!("打开会话通道失败: {e}")))
     }
 
+    /// 在远端 shell 执行一条命令，收集 stdout/stderr/退出码。
+    /// argv 逐个 POSIX 单引号包裹（内部 ' 转义为 '\''）杜绝注入；整体超时 30s。
+    pub async fn exec(&self, program: &str, args: &[String]) -> Result<ExecOutput> {
+        const EXEC_TIMEOUT: Duration = Duration::from_secs(30);
+
+        let channel = self.open_session_channel().await?;
+        let mut command = shell_quote(program);
+        for arg in args {
+            command.push(' ');
+            command.push_str(&shell_quote(arg));
+        }
+        channel
+            .exec(true, command.into_bytes())
+            .await
+            .map_err(|e| Error::Sftp(format!("执行远端命令失败: {e}")))?;
+
+        // 通道所有权留在 Option 里：超时路径仍能显式 close（远端进程随通道终止）
+        let mut channel_opt = Some(channel);
+        let collected = tokio::time::timeout(EXEC_TIMEOUT, async {
+            let channel = channel_opt.as_mut().expect("channel 在执行期间不会被取走");
+            let mut stdout = Vec::new();
+            let mut stderr = Vec::new();
+            let mut exit_code = None;
+            while let Some(msg) = channel.wait().await {
+                match msg {
+                    ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
+                    ChannelMsg::ExtendedData { data, .. } => stderr.extend_from_slice(&data),
+                    ChannelMsg::ExitStatus { exit_status } => exit_code = Some(exit_status),
+                    ChannelMsg::Eof | ChannelMsg::Close => break,
+                    _ => {}
+                }
+            }
+            (stdout, stderr, exit_code)
+        })
+        .await;
+
+        match collected {
+            Ok((stdout, stderr, exit_code)) => Ok(ExecOutput {
+                stdout: String::from_utf8_lossy(&stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&stderr).into_owned(),
+                exit_code,
+            }),
+            Err(_) => {
+                if let Some(channel) = channel_opt.take() {
+                    let _ = channel.close().await;
+                }
+                Err(Error::Sftp("远端命令执行超时（30s）".into()))
+            }
+        }
+    }
+
     /// 创建远端文件写入句柄（上传流用；已存在则截断）。
     pub async fn open_write(&self, path: &str) -> Result<RemoteFile> {
         self.sftp
@@ -414,5 +467,39 @@ pub(crate) fn join_remote(dir: &str, name: &str) -> String {
         format!("/{name}")
     } else {
         format!("{dir}/{name}")
+    }
+}
+
+/// exec 命令结果（UTF-8 lossy 解码）。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecOutput {
+    pub stdout: String,
+    pub stderr: String,
+    /// 被信号终止或未收到退出状态时为 null
+    pub exit_code: Option<u32>,
+}
+
+/// POSIX 单引号包裹：内部 ' 转义为 '\''，杜绝远端文件名注入。
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shell_quote;
+
+    #[test]
+    fn shell_quote_wraps_plain_text() {
+        assert_eq!(shell_quote("abc"), "'abc'");
+        assert_eq!(shell_quote("/var/log/a.txt"), "'/var/log/a.txt'");
+        assert_eq!(shell_quote(""), "''");
+    }
+
+    #[test]
+    fn shell_quote_escapes_single_quotes() {
+        // a'b → 'a'\''b'（shell 解析回原文 a'b）
+        assert_eq!(shell_quote("a'b"), "'a'\\''b'");
+        assert_eq!(shell_quote("it's a `rm -rf` test"), "'it'\\''s a `rm -rf` test'");
     }
 }

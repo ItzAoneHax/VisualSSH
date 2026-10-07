@@ -395,6 +395,7 @@ export const useExplorerStore = defineStore("explorer", () => {
     visibleEntries,
     breadcrumbSegments,
     open,
+    reloadPreserve,
     back,
     forward,
     enter,

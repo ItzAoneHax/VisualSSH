@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ClipboardCopy,
+  ClipboardPaste,
   Copy,
   Download,
   Eye,
@@ -19,10 +20,12 @@ import {
   Lock,
   Pencil,
   RefreshCw,
+  Scissors,
   ScrollText,
   Search,
   Settings,
   SquareTerminal,
+  TextSelect,
   Trash2,
   TriangleAlert,
   Upload,
@@ -30,6 +33,7 @@ import {
 } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { nextTick } from "vue";
+import { tempDir } from "@tauri-apps/api/path";
 
 import ContextMenu from "@/components/common/ContextMenu.vue";
 import type { MenuItem } from "@/components/common/DropdownMenu.vue";
@@ -43,6 +47,7 @@ import EditorDrawer from "@/components/workspace/EditorDrawer.vue";
 import TerminalPanel from "@/components/workspace/TerminalPanel.vue";
 import TransferCenter from "@/components/workspace/TransferCenter.vue";
 import { useConnectionsStore } from "@/stores/connections";
+import { useClipboardStore } from "@/stores/clipboard";
 import { useConflictStore, type IncomingItem } from "@/stores/conflicts";
 import { useEditorStore } from "@/stores/editor";
 import { useExplorerStore } from "@/stores/explorer";
@@ -51,7 +56,16 @@ import { useTerminalStore } from "@/stores/terminal";
 import { useTransferStore } from "@/stores/transfer";
 import type { FileEntry } from "@/types";
 import { copyText, joinPath, pathBaseName } from "@/utils/format";
-import { copyVirtualFiles, readClipboardFiles } from "@/api/clipboard";
+import {
+  copyVirtualFiles,
+  readClipboardFiles,
+} from "@/api/clipboard";
+import {
+  execSsh,
+  listDir,
+  renameSsh,
+  type ExecOutput,
+} from "@/api/ssh";
 import { localFileMeta } from "@/api/transfer";
 
 const emit = defineEmits<{
@@ -62,6 +76,7 @@ const connections = useConnectionsStore();
 const explorer = useExplorerStore();
 const transfers = useTransferStore();
 const conflicts = useConflictStore();
+const clip = useClipboardStore();
 const editor = useEditorStore();
 const terminalStore = useTerminalStore();
 const settings = useSettingsStore();
@@ -95,38 +110,58 @@ function closeSearch() {
   explorer.searchQuery = "";
 }
 
-/** Ctrl+C：选中远端文件写入 OLE 虚拟文件剪贴板（FileZilla 式）——
- *  复制瞬间零下载零传输条目；本地资源管理器粘贴时才经 IStream 流式拉取 */
-async function copySelectionToClipboard() {
-  const connectionId = connections.active?.connectionId;
-  if (!connectionId || explorer.selectedNames.size === 0) return;
-  const files = [...explorer.selectedNames]
-    .map((n) => explorer.entryByName(n))
-    .filter((e): e is FileEntry => !!e);
-  if (files.some((f) => f.kind === "dir")) {
-    explorer.error = "复制到剪贴板暂不支持文件夹，请仅选择文件";
-    return;
+/** 右键项在多选集合内 → 整个集合；否则单项 / 当前选择（Delete 同款规则） */
+function resolveTargetNames(entry: FileEntry | null): string[] | null {
+  if (entry && explorer.isSelected(entry.name) && explorer.selectedNames.size > 1) {
+    return [...explorer.selectedNames];
   }
-  try {
-    await copyVirtualFiles(
-      connectionId,
-      explorer.cwd,
-      files.map((f) => ({ name: f.name, size: f.size, mtime: f.mtime })),
-    );
-    showCopyHint(files.length);
-  } catch (e) {
-    explorer.error = e instanceof Error ? e.message : String(e);
-  }
+  if (entry) return [entry.name];
+  const names = [...explorer.selectedNames];
+  return names.length ? names : null;
 }
 
-/** 「已复制 N 项」轻提示：3 秒自动消失（错误横幅仍走 explorer.error） */
-const copyHint = ref("");
-let copyHintTimer: ReturnType<typeof setTimeout> | undefined;
+/** Ctrl+C：双写——系统虚拟文件剪贴板（本地 Explorer 粘贴用，仅文件）+
+ *  内部剪贴板（远端 Ctrl+V 粘贴用，含文件夹；文件夹走系统侧会失败故静默跳过） */
+async function copySelectionToClipboard(entry?: FileEntry | null) {
+  const connectionId = connections.active?.connectionId;
+  const names = resolveTargetNames(entry ?? null);
+  if (!connectionId || !names?.length) return;
+  const files = names
+    .map((n) => explorer.entryByName(n))
+    .filter((e): e is FileEntry => !!e);
+  clip.write("copy", connectionId, explorer.cwd, files.map((f) => f.name));
+  if (!files.some((f) => f.kind === "dir")) {
+    try {
+      await copyVirtualFiles(
+        connectionId,
+        explorer.cwd,
+        files.map((f) => ({ name: f.name, size: f.size, mtime: f.mtime })),
+      );
+    } catch (e) {
+      explorer.error = e instanceof Error ? e.message : String(e);
+      return;
+    }
+  }
+  showHint(`已复制 ${files.length} 项`);
+}
 
-function showCopyHint(count: number) {
-  copyHint.value = `已复制 ${count} 项 — 在本地资源管理器中粘贴时下载`;
-  clearTimeout(copyHintTimer);
-  copyHintTimer = setTimeout(() => (copyHint.value = ""), 3000);
+/** Ctrl+X：仅写内部剪贴板；被剪切行以 0.4 透明度标记（Files DimItemOpacity） */
+function cutSelectionToClipboard(entry?: FileEntry | null) {
+  const connectionId = connections.active?.connectionId;
+  const names = resolveTargetNames(entry ?? null);
+  if (!connectionId || !names?.length) return;
+  clip.write("cut", connectionId, explorer.cwd, names);
+  showHint(`已剪切 ${names.length} 项`);
+}
+
+/** 轻提示：3 秒自动消失（错误横幅仍走 explorer.error） */
+const hint = ref("");
+let hintTimer: ReturnType<typeof setTimeout> | undefined;
+
+function showHint(text: string) {
+  hint.value = text;
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => (hint.value = ""), 3000);
 }
 
 /** 上传前冲突解析（Ctrl+V 与拖放共用）：有同名先弹对话框，取消/出错返回 null */
@@ -157,10 +192,18 @@ async function resolveUploadConflicts(
   }
 }
 
-/** Ctrl+V：读系统剪贴板文件列表（HDROP），过冲突检查后逐个上传到当前目录 */
-async function pasteFromClipboard() {
+/** Ctrl+V：内部剪贴板非空 → 远端粘贴（内部优先）；为空回落系统 HDROP 上传 */
+async function pasteFromClipboard(pasteIntoSelection = false) {
   const connectionId = connections.active?.connectionId;
   if (!connectionId) return;
+  if (clip.clip && clip.clip.names.length) {
+    if (clip.clip.connectionId !== connectionId) {
+      clip.clear();
+    } else {
+      await pasteRemote(connectionId, pasteIntoSelection);
+      return;
+    }
+  }
   let localPaths: string[];
   try {
     localPaths = await readClipboardFiles();
@@ -173,6 +216,134 @@ async function pasteFromClipboard() {
   for (const item of resolved) {
     await transfers.startUpload(connectionId, item.path, explorer.cwd, item.finalName);
   }
+}
+
+/** 远端粘贴：先过冲突对话框（目标 = 粘贴目录），再按模式执行。
+ *  cut = SFTP rename → exec mv -f 回退；copy = exec cp -a → 单文件「暂存下载→上传」回退。 */
+async function pasteRemote(connectionId: string, pasteIntoSelection: boolean) {
+  const c = clip.clip;
+  if (!c) return;
+
+  // Ctrl+Shift+V：恰好选中一个文件夹 → 粘贴进该文件夹（Files PasteItemToSelectionAction）
+  let targetDir = explorer.cwd;
+  if (pasteIntoSelection && explorer.selectedNames.size === 1) {
+    const entry = explorer.entryByName([...explorer.selectedNames][0]);
+    if (entry?.kind === "dir") targetDir = joinPath(explorer.cwd, entry.name);
+  }
+
+  if (c.mode === "cut" && c.sourceDir === targetDir) {
+    showHint("源目录与目标目录相同，无需移动");
+    return;
+  }
+
+  // 源目录现状：取条目元数据（同时校验源项仍存在，删除/移动后标记自然失效）
+  let sourceEntries: FileEntry[];
+  try {
+    sourceEntries = await listDir(connectionId, c.sourceDir);
+  } catch (e) {
+    explorer.error = e instanceof Error ? e.message : String(e);
+    return;
+  }
+  const byName = new Map(sourceEntries.map((e) => [e.name, e]));
+  const present = c.names.filter((n) => byName.has(n));
+  if (!present.length) {
+    clip.clear();
+    return;
+  }
+  const incoming: IncomingItem[] = present.map((n) => {
+    const e = byName.get(n)!;
+    return { name: e.name, size: e.size, mtime: e.mtime, kind: e.kind };
+  });
+
+  let decisions;
+  try {
+    decisions = await conflicts.resolve(connectionId, targetDir, incoming);
+  } catch (e) {
+    explorer.error = e instanceof Error ? e.message : String(e);
+    return;
+  }
+  if (!decisions) return;
+  const jobs = decisions
+    .filter((d) => d.action === "proceed")
+    .map((d) => ({ ...d, source: byName.get(d.name)! }));
+  if (!jobs.length) return; // 全部跳过：剪贴板保留
+
+  const op = await transfers.startRemoteOp(
+    c.mode === "cut" ? "remote-move" : "remote-copy",
+    jobs.length,
+    targetDir,
+  );
+  const failed: string[] = [];
+  let done = 0;
+  for (const job of jobs) {
+    if (op.isCancelled()) break;
+    const src = joinPath(c.sourceDir, job.name);
+    const dst = joinPath(targetDir, job.finalName);
+    try {
+      if (c.mode === "cut") {
+        try {
+          // 同文件系统跨目录改名零拷贝
+          await renameSsh(connectionId, src, dst);
+        } catch {
+          const r = await execSsh(connectionId, "mv", ["-f", "--", src, dst]);
+          if (r.exitCode !== 0) {
+            throw new Error(r.stderr.trim() || `mv 退出码 ${r.exitCode ?? "未知"}`);
+          }
+        }
+      } else {
+        let result: ExecOutput | null = null;
+        try {
+          result = await execSsh(connectionId, "cp", ["-a", "--", src, dst]);
+        } catch {
+          result = null;
+        }
+        if (!result || result.exitCode === 126 || result.exitCode === 127) {
+          // shell/cp 不可用：仅单文件可走「暂存下载→上传」回退
+          if (job.source.kind !== "file") {
+            throw new Error("服务器 shell 不可用，无法复制文件夹");
+          }
+          await fallbackCopyViaTemp(connectionId, src, job.finalName, targetDir);
+        } else if (result.exitCode !== 0) {
+          throw new Error(result.stderr.trim() || `cp 退出码 ${result.exitCode ?? "未知"}`);
+        }
+      }
+      done += 1;
+    } catch (e) {
+      failed.push(`${job.name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  if (op.isCancelled()) {
+    // cancelRemoteOp 已把卡片置为已取消
+  } else if (failed.length) {
+    op.setFailed(`完成 ${done} 项，失败 ${failed.length} 项 — ${failed[0]}`);
+  } else {
+    op.setDone();
+  }
+  clip.clear();
+  if (targetDir === explorer.cwd || c.sourceDir === explorer.cwd) {
+    await explorer.reloadPreserve();
+  }
+  if (!failed.length && !op.isCancelled()) {
+    showHint(`已${c.mode === "cut" ? "移动" : "复制"} ${done} 项`);
+  } else if (failed.length) {
+    explorer.error = `${c.mode === "cut" ? "移动" : "复制"}未全部完成 — ${failed.join("；")}`;
+  }
+}
+
+/** exec 不可用时的单文件复制回退：暂存下载到本地临时目录再上传（复用传输中心管线） */
+async function fallbackCopyViaTemp(
+  connectionId: string,
+  remotePath: string,
+  name: string,
+  targetDir: string,
+) {
+  const base = (await tempDir()).replace(/[\\/]+$/, "");
+  const local = `${base}/VisualSSH/${crypto.randomUUID()}-${name}`;
+  const transferId = await transfers.startDownloadTo(connectionId, remotePath, local);
+  const ok = await transfers.waitAllDone([transferId]);
+  if (!ok) throw new Error(`暂存下载失败（${name}）`);
+  await transfers.startUpload(connectionId, local, targetDir, name);
 }
 
 /** Files 快速跳转（对应侧栏驱动器/常用位置区） */
@@ -284,6 +455,12 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
       { key: "newDir", label: "新建文件夹", icon: FolderPlus },
       { key: "newFile", label: "新建文件", icon: FilePlus },
       { key: "sep", label: "", separator: true },
+      {
+        key: "paste",
+        label: clip.count ? `粘贴（${clip.count} 项）` : "粘贴",
+        icon: ClipboardPaste,
+        disabled: clip.count === 0,
+      },
       { key: "refresh", label: "刷新", icon: RefreshCw },
       { key: "sep2", label: "", separator: true },
       {
@@ -300,7 +477,9 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
     items.push({ key: "sep", label: "", separator: true });
   }
   items.push(
-    { key: "copyName", label: "复制名称", icon: Copy },
+    { key: "cut", label: "剪切", icon: Scissors },
+    { key: "copy", label: "复制", icon: Copy },
+    { key: "copyName", label: "复制名称", icon: TextSelect },
     { key: "copyPath", label: "复制路径", icon: ClipboardCopy },
     {
       key: "download",
@@ -327,11 +506,18 @@ async function onCtxMenuSelect(key: string) {
     if (key === "newDir") explorer.startCreate("dir");
     else if (key === "newFile") explorer.startCreate("file");
     else if (key === "refresh" || key === "refresh2") explorer.refresh();
+    else if (key === "paste") void pasteFromClipboard(false);
     return;
   }
   switch (key) {
     case "open":
       explorer.enter(entry.name);
+      break;
+    case "cut":
+      cutSelectionToClipboard(entry);
+      break;
+    case "copy":
+      void copySelectionToClipboard(entry);
       break;
     case "copyName":
       await copyText(entry.name);
@@ -400,17 +586,19 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
-  clearTimeout(copyHintTimer);
+  clearTimeout(hintTimer);
   unlistenDrag?.();
-  // 工作区销毁（断开连接）→ 终端面板复位（pty 由后端 ssh_disconnect 联动关闭）
+  // 工作区销毁（断开连接）→ 终端面板复位 + 内部剪贴板清空
   terminalStore.reset();
+  clip.clear();
 });
 
 /** 拖拽悬停：文件区显示「释放以上传」覆盖层 */
 const dragOver = ref(false);
 let unlistenDrag: UnlistenFn | null = null;
 
-/** F2 重命名、Delete 删除选中项；Alt+↑ 上一级 / Alt+← 后退 / Alt+→ 前进 */
+/** F2 重命名、Delete 删除选中项、Ctrl+C/X/V 剪贴板；Alt+Enter 属性；
+ *  Alt+↑ 上一级 / Alt+← 后退 / Alt+→ 前进 */
 function onKeydown(e: KeyboardEvent) {
   // 就地编辑/表单输入时快捷键让位
   if (
@@ -426,9 +614,15 @@ function onKeydown(e: KeyboardEvent) {
     void copySelectionToClipboard();
     return;
   }
+  if (e.ctrlKey && (e.key === "x" || e.key === "X")) {
+    e.preventDefault();
+    cutSelectionToClipboard();
+    return;
+  }
   if (e.ctrlKey && (e.key === "v" || e.key === "V")) {
     e.preventDefault();
-    void pasteFromClipboard();
+    // Ctrl+Shift+V：恰好选中一个文件夹时粘贴进该文件夹
+    void pasteFromClipboard(e.shiftKey);
     return;
   }
   if (e.key === "F2" && explorer.selectedNames.size === 1) {
@@ -622,14 +816,14 @@ function onKeydown(e: KeyboardEvent) {
               重试
             </button>
           </div>
-          <!-- 复制轻提示（accent 色，自动消失；与错误横幅同形） -->
+          <!-- 轻提示（accent 色，自动消失；与错误横幅同形） -->
           <div
-            v-if="copyHint"
+            v-if="hint"
             class="m-2 flex items-center gap-2.5 rounded-lg px-3.5 py-2.5"
             :style="{ background: 'color-mix(in srgb, var(--accent) 8%, transparent)' }"
           >
             <ClipboardCopy :size="15" class="shrink-0 text-accent" />
-            <span class="min-w-0 flex-1 truncate text-xs text-dim">{{ copyHint }}</span>
+            <span class="min-w-0 flex-1 truncate text-xs text-dim">{{ hint }}</span>
           </div>
           <FileTable @context-menu="onFileContextMenu" @open-file="onOpenFile" />
         </div>

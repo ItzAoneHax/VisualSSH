@@ -108,6 +108,22 @@ export function dirStatsCancel(statsId: string): Promise<boolean> {
   return invoke("ssh_dir_stats_cancel", { statsId });
 }
 
+/** 远端 exec 结果（UTF-8 lossy）；exitCode 为 null 表示被信号终止或未收到退出状态 */
+export interface ExecOutput {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+/** 在远端 shell 执行命令（argv 由后端 POSIX 单引号包裹，30s 整体超时） */
+export function execSsh(
+  connectionId: string,
+  program: string,
+  args: string[],
+): Promise<ExecOutput> {
+  return invoke("ssh_exec", { connectionId, program, args });
+}
+
 /** 指纹变更经用户确认后，更新 known_hosts 记录（随后重连） */
 export function trustHost(
   host: string,

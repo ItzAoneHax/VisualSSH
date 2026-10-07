@@ -27,6 +27,7 @@ pub fn run() {
             commands::ssh_read_file,
             commands::ssh_write_file,
             commands::ssh_read_link,
+            commands::ssh_exec,
             commands::ssh_disconnect,
             commands::ssh_trust_host,
             commands::ssh_known_hosts_list,

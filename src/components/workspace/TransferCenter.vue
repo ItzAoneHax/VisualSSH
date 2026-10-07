@@ -5,6 +5,8 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
+  Copy,
+  FolderInput,
   MoreHorizontal,
   X,
 } from "@lucide/vue";
@@ -65,12 +67,22 @@ function isActive(row: TransferRow): boolean {
   return row.status === "queued" || row.status === "running";
 }
 
+/** 远端内部复制/移动（前端编排批次，不定进度，无速度折线） */
+function isRemoteOp(row: TransferRow): boolean {
+  return row.direction === "remote-copy" || row.direction === "remote-move";
+}
+
+/** 排队与远端批次走不定进度条（Files：总大小未知时 IsIndeterminateProgress） */
+function showIndeterminate(row: TransferRow): boolean {
+  return row.status === "queued" || (isRemoteOp(row) && row.status === "running");
+}
+
 function percent(row: TransferRow): number {
   if (row.total <= 0) return 0;
   return Math.min(100, (row.bytes / row.total) * 100);
 }
 
-/** 状态图标：进行中=方向箭头，完成=✓，失败/取消=X（Files StatusCenterItem） */
+/** 状态图标：进行中=方向箭头/远端复制·移动，完成=✓，失败/取消=X（Files StatusCenterItem） */
 function stateIcon(row: TransferRow) {
   switch (row.status) {
     case "done":
@@ -79,6 +91,7 @@ function stateIcon(row: TransferRow) {
     case "cancelled":
       return X;
     default:
+      if (isRemoteOp(row)) return row.direction === "remote-copy" ? Copy : FolderInput;
       return row.direction === "upload" ? ArrowUp : ArrowDown;
   }
 }
@@ -155,7 +168,10 @@ function openCancelMenu(row: TransferRow, e: MouseEvent) {
 function onCancelMenuSelect(key: string) {
   const target = cancelMenu.value;
   cancelMenu.value = null;
-  if (target && key === "cancel") transfers.cancel(target.id);
+  if (!target || key !== "cancel") return;
+  const row = transfers.rows.find((r) => r.id === target.id);
+  if (row && isRemoteOp(row)) transfers.cancelRemoteOp(target.id);
+  else transfers.cancel(target.id);
 }
 </script>
 
@@ -293,9 +309,9 @@ function onCancelMenuSelect(key: string) {
                     >
                       <MoreHorizontal :size="16" />
                     </button>
-                    <!-- 展开速度折线（仅运行中有速度数据） -->
+                    <!-- 展开速度折线（仅真实传输运行中有速度数据；远端批次无速度概念） -->
                     <button
-                      v-if="row.status === 'running'"
+                      v-if="row.status === 'running' && !isRemoteOp(row)"
                       type="button"
                       class="btn-icon h-8 w-8"
                       :title="isExpanded(row.id) ? '收起' : '速度图表'"
@@ -324,13 +340,15 @@ function onCancelMenuSelect(key: string) {
 
               <!-- 进度区（仅进行中） -->
               <div v-if="isActive(row)" class="mt-2 pl-11">
-                <!-- 排队：不定进度条 -->
-                <template v-if="row.status === 'queued'">
+                <!-- 排队 / 远端批次：不定进度条 -->
+                <template v-if="showIndeterminate(row)">
                   <div
                     class="progress-indeterminate h-1 rounded-full"
                     :style="{ background: 'var(--fill-subtle)' }"
                   />
-                  <p class="mt-1.5 text-xs text-dim">{{ progressCaption(row) }}</p>
+                  <p v-if="row.status === 'queued'" class="mt-1.5 text-xs text-dim">
+                    {{ progressCaption(row) }}
+                  </p>
                 </template>
 
                 <!-- 运行中：收起 = 进度条+百分比；展开 = 速度折线（Files SpeedGraph 近似） -->
