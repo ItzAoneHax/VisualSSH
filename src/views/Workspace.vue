@@ -814,6 +814,10 @@ onMounted(async () => {
     );
   }
   window.addEventListener("keydown", onKeydown);
+  // G4 鼠标侧键（捕获阶段）：button 3 = XButton1 后退、4 = XButton2 前进，作用于
+  // 活动窗格历史栈；preventDefault 防 WebView2 默认历史导航。浏览器全局语义——
+  // 编辑器/终端悬浮窗聚焦时同样生效。
+  window.addEventListener("pointerdown", onMouseSideButton, true);
   // 系统文件拖入上传（WebView2 dragDropEnabled 默认开启；浏览器预览跳过）
   if ("__TAURI_INTERNALS__" in window) {
     unlistenDrag = await getCurrentWebview().onDragDropEvent(async (event) => {
@@ -839,6 +843,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
+  window.removeEventListener("pointerdown", onMouseSideButton, true);
   clearTimeout(hintTimer);
   unlistenDrag?.();
   // 工作区销毁（断开连接）→ 终端面板复位 + 内部剪贴板清空
@@ -849,6 +854,14 @@ onBeforeUnmount(() => {
 /** 拖拽悬停：文件区显示「释放以上传」覆盖层 */
 const dragOver = ref(false);
 let unlistenDrag: UnlistenFn | null = null;
+
+/** G4 鼠标侧键：XButton1（button 3）后退、XButton2（button 4）前进 */
+function onMouseSideButton(e: PointerEvent) {
+  if (e.button !== 3 && e.button !== 4) return;
+  e.preventDefault();
+  if (e.button === 3) explorer.back();
+  else explorer.forward();
+}
 
 /** F2 重命名、Delete 删除选中项、Ctrl+C/X/V 剪贴板；Alt+Enter 属性；
  *  Alt+↑ 上一级 / Alt+← 后退 / Alt+→ 前进；
