@@ -4,6 +4,7 @@ import { computed, ref } from "vue";
 import { readFileSsh, writeFileSsh } from "@/api/ssh";
 import type { FileEntry } from "@/types";
 import { joinPath } from "@/utils/format";
+import { useSettingsStore } from "@/stores/settings";
 
 /** 文本预览白名单（提示词 M4 清单） */
 const TEXT_EXTS = new Set([
@@ -61,7 +62,8 @@ export const useEditorStore = defineStore("editor", () => {
     connectionId.value = connId;
     path.value = joinPath(cwd, entry.name);
     fileName.value = entry.name;
-    editable.value = false;
+    // 默认模式按设置（editorReadOnlyDefault：true = 进只读，false = 进编辑态）
+    editable.value = !useSettingsStore().settings.editorReadOnlyDefault;
     error.value = null;
     savedDoc.value = "";
     doc.value = "";

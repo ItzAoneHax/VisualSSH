@@ -7,6 +7,7 @@ import {
   FileText,
   History as HistoryIcon,
   MousePointerClick,
+  Pencil,
   TriangleAlert,
 } from "@lucide/vue";
 
@@ -200,6 +201,26 @@ function setShowHidden(value: boolean) {
         class="toggle-switch"
         :class="s.restoreLastDir && 'on'"
         @click="settings.update({ restoreLastDir: !s.restoreLastDir })"
+      >
+        <span class="toggle-knob" />
+      </button>
+    </div>
+
+    <div class="settings-card">
+      <Pencil :size="20" class="shrink-0 text-dim" />
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium">编辑器打开时进入编辑状态</p>
+        <p class="mt-0.5 text-xs text-dim">
+          开启后双击文件直接进入编辑态；关闭则默认只读，需点「编辑」解锁。
+        </p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        :aria-checked="!s.editorReadOnlyDefault"
+        class="toggle-switch"
+        :class="!s.editorReadOnlyDefault && 'on'"
+        @click="settings.update({ editorReadOnlyDefault: !s.editorReadOnlyDefault })"
       >
         <span class="toggle-knob" />
       </button>

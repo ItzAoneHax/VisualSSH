@@ -6,6 +6,7 @@ import {
   FileX,
   LoaderCircle,
   Pencil,
+  PencilOff,
   X,
 } from "@lucide/vue";
 import { EditorState, Compartment, type Extension } from "@codemirror/state";
@@ -393,17 +394,18 @@ function discardAndClose() {
         格式化
       </button>
 
-      <!-- 编辑/只读切换：可写或未保存时高亮；预览态点击=切源码并进入编辑 -->
+      <!-- 编辑/只读切换：图标随状态切换（G3）；预览态点击=切源码并进入编辑 -->
       <button
         type="button"
         class="h-7 gap-1.5 px-2.5 text-xs"
         :class="editor.editable || editor.dirty ? 'btn-primary' : 'btn-secondary'"
-        :title="editor.editable ? '当前可编辑' : '切换为可编辑'"
+        :title="editor.editable ? '切换为只读' : '进入编辑'"
         :disabled="editor.unsupported"
         @click="onEditClick"
       >
-        <Pencil :size="13" />
-        编辑
+        <PencilOff v-if="editor.editable" :size="13" />
+        <Pencil v-else :size="13" />
+        {{ editor.editable ? "编辑中" : "编辑" }}
       </button>
 
       <!-- 最大化/还原 -->

@@ -65,6 +65,8 @@ export interface AppSettings {
   detailsRowHeight: number;
   /** 恢复上次浏览目录（每连接记忆 lastDir；Files 会话恢复的每连接简化版） */
   restoreLastDir: boolean;
+  /** 编辑器打开时默认只读（true）还是直接进入编辑态（false，默认） */
+  editorReadOnlyDefault: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -91,6 +93,7 @@ const DEFAULTS: AppSettings = {
   showFileExtensions: true,
   detailsRowHeight: 36,
   restoreLastDir: true,
+  editorReadOnlyDefault: false,
 };
 
 function load(): AppSettings {
