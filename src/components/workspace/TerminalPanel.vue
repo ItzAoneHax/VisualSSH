@@ -90,10 +90,10 @@ function currentTheme(): ITheme {
     : LIGHT_THEME;
 }
 
-/** 创建 xterm 并接线（terminalId 就绪后执行一次） */
+/** 创建 xterm 并接线（terminalId 就绪后执行一次）；setSink 内部同步重放会话日志 */
 async function mountXterm() {
   await nextTick();
-  if (!host.value || xterm || !terminalStore.terminalId) return;
+  if (!host.value || xterm || !terminalStore.activeTerminalId) return;
   xterm = new Terminal({
     fontFamily: '"JetBrains Mono Variable", "Cascadia Code", Consolas, monospace',
     fontSize: useSettingsStore().settings.terminalFontSize,
@@ -129,15 +129,15 @@ async function mountXterm() {
     attributeFilter: ["class"],
   });
 
-  terminalStore.setSink(
-    (bytes) => xterm?.write(bytes),
-    (status) => {
-      xterm?.write(
-        `\r\n\x1b[90m[进程已退出${status == null ? "" : `，退出码 ${status}`}] — 可关闭此窗口\x1b[0m\r\n`,
-      );
-    },
-  );
+  terminalStore.setSink(sinkData, sinkExit);
 }
+
+const sinkData = (bytes: Uint8Array) => xterm?.write(bytes);
+const sinkExit = (status: number | null) => {
+  xterm?.write(
+    `\r\n\x1b[90m[进程已退出${status == null ? "" : `，退出码 ${status}`}] — 可关闭此窗口\x1b[0m\r\n`,
+  );
+};
 
 function syncSize() {
   if (!xterm || !fitAddon) return;
@@ -172,11 +172,21 @@ watch(
 // terminalId 就绪 → 挂载 xterm。immediate 兜底：openIn 的 invoke 若快于面板
 // 挂载完成，普通 watch 会错过赋值瞬间（mock 即时 resolve 时必现）
 watch(
-  () => terminalStore.terminalId,
+  () => terminalStore.activeTerminalId,
   (id) => {
     if (id) void mountXterm();
   },
   { immediate: true },
+);
+// 切换展示的连接会话（M7：面板切内容不断开）：清屏 + 重新注入 sink（内部重放新会话日志）
+watch(
+  () => terminalStore.activeConnectionId,
+  (cid, old) => {
+    if (!xterm || !cid || cid === old) return;
+    terminalStore.setSink(null, null);
+    xterm.reset();
+    terminalStore.setSink(sinkData, sinkExit);
+  },
 );
 
 /** 右下角拖拽调整窗体大小（宽 480–92vw / 高 240–90vh） */
@@ -261,9 +271,9 @@ watch(
             class="flex h-10 shrink-0 items-center gap-2 px-3"
             @dblclick.self="toggleMaximized"
           >
-            <SquareTerminal :size="15" class="shrink-0" :class="terminalStore.exited ? 'text-faint' : 'text-accent'" />
+            <SquareTerminal :size="15" class="shrink-0" :class="terminalStore.activeExited ? 'text-faint' : 'text-accent'" />
             <span class="text-[13px] font-semibold">终端</span>
-            <span v-if="terminalStore.exited" class="text-xs text-faint">已结束</span>
+            <span v-if="terminalStore.activeExited" class="text-xs text-faint">已结束</span>
             <span v-if="terminalStore.error" class="min-w-0 flex-1 truncate text-xs text-danger" :title="terminalStore.error">
               {{ terminalStore.error }}
             </span>
