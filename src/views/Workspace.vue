@@ -3,12 +3,14 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   ClipboardCopy,
+  Columns2,
   FolderOpen,
   FolderTree,
   HardDrive,
   House,
   PinOff,
   ScrollText,
+  Search,
   Settings,
   SquareTerminal,
 } from "@lucide/vue";
@@ -19,6 +21,7 @@ import type { MenuItem } from "@/components/common/DropdownMenu.vue";
 import ConflictDialog from "@/components/explorer/ConflictDialog.vue";
 import EditorDrawer from "@/components/workspace/EditorDrawer.vue";
 import ExplorerPane from "@/components/workspace/ExplorerPane.vue";
+import SearchBox from "@/components/workspace/SearchBox.vue";
 import TabBar from "@/components/workspace/TabBar.vue";
 import TerminalPanel from "@/components/workspace/TerminalPanel.vue";
 import TransferCenter from "@/components/workspace/TransferCenter.vue";
@@ -63,6 +66,61 @@ const activeConn = computed(
 const activeExplorer = computed(() =>
   workspace.activePaneId ? useExplorer(workspace.activePaneId) : null,
 );
+
+/** —— 双栏分屏（Files ShellPanesPage：每标签最多 2 窗格） —— */
+const isDualPane = computed(() => (activeTab.value?.panes.length ?? 1) > 1);
+const arrangement = computed(() => activeTab.value?.arrangement ?? null);
+const paneRatio = computed(() => activeTab.value?.paneRatio ?? 50);
+/** 搜索框展开态（全局一份，作用于活动窗格） */
+const searchOpen = ref(false);
+
+/** 分屏按钮：单窗格 → 默认左右分屏（进活动窗格当前目录）；双栏 → 关闭活动窗格 */
+function toggleSplit(arrangement?: "vertical" | "horizontal") {
+  const tab = activeTab.value;
+  const ex = activeExplorer.value;
+  if (!tab || !ex) return;
+  if (tab.panes.length < 2) {
+    workspace.openSecondaryPane(arrangement ?? "vertical", ex.cwd);
+  } else {
+    workspace.closePane(tab.activePaneId);
+    searchOpen.value = false;
+  }
+}
+
+/** 分隔条拖动（4px 透明，Files GridSplitter；双击 1:1 等分 Sizer_OnDoubleTapped） */
+const splitterDragging = ref(false);
+
+function onSplitterDown(e: PointerEvent) {
+  const tab = activeTab.value;
+  if (!tab?.arrangement) return;
+  splitterDragging.value = true;
+  // 基准容器 = 双栏容器（分隔条 → 窗格 wrapper → 容器）
+  const container = (e.currentTarget as HTMLElement).parentElement?.parentElement;
+  if (!container) return;
+  const rect = container.getBoundingClientRect();
+  const vertical = tab.arrangement === "vertical"; // 左右并排
+  const start = vertical ? e.clientX : e.clientY;
+  const total = vertical ? rect.width : rect.height;
+  const startRatio = tab.paneRatio;
+  const onMove = (ev: PointerEvent) => {
+    if (!total) return;
+    const delta = (vertical ? ev.clientX : ev.clientY) - start;
+    const pct = startRatio + (delta / total) * 100;
+    tab.paneRatio = Math.min(85, Math.max(15, pct));
+  };
+  const onUp = () => {
+    splitterDragging.value = false;
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+
+function onSplitterDblClick() {
+  const tab = activeTab.value;
+  if (tab) tab.paneRatio = 50;
+}
 
 /** 挂载：建立工作区会话（单标签单窗格）并加载初始目录。
  *  App 以「是否在主页」控制本组件挂载，连接数变化不重建（多标签共存） */
@@ -201,8 +259,30 @@ function onReopenTab() {
   openTabForConnection(conn, record.cwd || conn.rootPath);
 }
 
-/** Ctrl+T 新建（弹列表）/ Ctrl+W 关闭当前 / Ctrl+Shift+T 重开已关闭 */
+/** Ctrl+T 新建（弹列表）/ Ctrl+W 关闭当前 / Ctrl+Shift+T 重开已关闭；
+ *  Alt+Shift+V/H 分屏（Files SplitPaneVertically/HorizontallyAction，按分隔条方向命名：
+ *  V=左右并排 / H=上下堆叠）；Ctrl+Shift+→/← 焦点切换（FocusOtherPaneAction，← 为对称补充） */
 function onKeydown(e: KeyboardEvent) {
+  if (e.altKey && e.shiftKey && !e.ctrlKey) {
+    const key = e.key.toLowerCase();
+    if (key === "v") {
+      e.preventDefault();
+      toggleSplit("vertical");
+      return;
+    }
+    if (key === "h") {
+      e.preventDefault();
+      toggleSplit("horizontal");
+      return;
+    }
+  }
+  if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+    if (isDualPane.value) {
+      e.preventDefault();
+      workspace.focusOtherPane();
+    }
+    return;
+  }
   if (!e.ctrlKey) return;
   const key = e.key.toLowerCase();
   if (key === "t" && !e.shiftKey) {
@@ -391,14 +471,25 @@ watch(
 
       <!-- 主列：窗格（地址行卡 + 文件区）+ 状态栏 -->
       <div class="flex min-w-0 flex-1 flex-col gap-1 p-2 pl-2.5">
-        <!-- 活动窗格（v-if 单窗格渲染；非活动标签状态留在 store，切回重挂载） -->
+        <!-- 单窗格：全局工具（搜索框/终端/传输/分屏）嵌在窗格地址行卡内（与单栏现状一致） -->
         <ExplorerPane
-          v-if="activeTab && workspace.activePaneId"
+          v-if="activeTab && workspace.activePaneId && !isDualPane"
           :key="workspace.activePaneId"
           :pane-id="workspace.activePaneId"
           :tab-id="activeTab.id"
         >
           <template #actions>
+            <SearchBox :pane-id="workspace.activePaneId" v-model:open="searchOpen" />
+            <button
+              type="button"
+              class="btn-icon"
+              :class="searchOpen && 'text-accent'"
+              :title="searchOpen ? '关闭搜索' : '搜索当前目录'"
+              aria-label="搜索"
+              @click="searchOpen = !searchOpen"
+            >
+              <Search :size="16" />
+            </button>
             <button
               type="button"
               class="btn-icon"
@@ -410,8 +501,99 @@ watch(
             </button>
 
             <TransferCenter />
+
+            <button
+              type="button"
+              class="btn-icon"
+              title="分屏（Alt+Shift+V 左右 / Alt+Shift+H 上下）"
+              aria-label="分屏"
+              @click="toggleSplit()"
+            >
+              <Columns2 :size="16" />
+            </button>
           </template>
         </ExplorerPane>
+
+        <!-- 双窗格：全局工具行独立一行，两窗格各自渲染导航段 + 文件区 -->
+        <template v-else-if="activeTab && workspace.activePaneId">
+          <!-- 全局工具行（一份：搜索框作用于活动窗格，无双份终端/传输） -->
+          <div
+            class="flex h-12 shrink-0 items-center gap-1 rounded-lg px-1"
+            :style="{ background: 'var(--toolbar)', border: '1px solid var(--line)' }"
+          >
+            <span class="min-w-0 flex-1 truncate px-2 text-xs text-faint">
+              {{ arrangement === "horizontal" ? "上下分屏" : "左右分屏" }} — 点击窗格切换焦点（Ctrl+Shift+→/←）
+            </span>
+            <SearchBox :pane-id="workspace.activePaneId" v-model:open="searchOpen" />
+            <button
+              type="button"
+              class="btn-icon"
+              :class="searchOpen && 'text-accent'"
+              :title="searchOpen ? '关闭搜索' : '搜索当前目录'"
+              aria-label="搜索"
+              @click="searchOpen = !searchOpen"
+            >
+              <Search :size="16" />
+            </button>
+            <button
+              type="button"
+              class="btn-icon"
+              title="打开终端（活动窗格当前目录）"
+              aria-label="打开终端"
+              @click="onOpenTerminal"
+            >
+              <SquareTerminal :size="16" />
+            </button>
+
+            <TransferCenter />
+
+            <button
+              type="button"
+              class="btn-icon"
+              title="关闭活动窗格（恢复单栏）"
+              aria-label="关闭活动窗格"
+              @click="toggleSplit()"
+            >
+              <Columns2 :size="16" />
+            </button>
+          </div>
+
+          <!-- 双栏容器：vertical=左右并排（分隔条竖直）/ horizontal=上下堆叠（Files 按分隔条方向命名） -->
+          <div
+            class="flex min-h-0 flex-1"
+            :class="arrangement === 'horizontal' ? 'flex-col' : 'flex-row'"
+          >
+            <div
+              v-for="(pane, i) in activeTab.panes"
+              :key="pane.id"
+              class="flex min-h-0 min-w-0"
+              :style="i === 0 ? {
+                flexBasis: `${paneRatio}%`,
+                flexGrow: 0,
+                flexShrink: 0,
+              } : { flex: '1 1 0%' }"
+            >
+              <ExplorerPane :pane-id="pane.id" :tab-id="activeTab.id" />
+              <!-- 分隔条（仅第 0 窗格后渲染）：4px 透明命中区，中心短指示线，拖拽时转 accent -->
+              <div
+                v-if="i === 0"
+                class="relative shrink-0"
+                :class="arrangement === 'horizontal' ? 'h-4 w-full cursor-row-resize' : 'w-4 self-stretch cursor-col-resize'"
+                role="separator"
+                :aria-orientation="arrangement === 'horizontal' ? 'horizontal' : 'vertical'"
+                title="拖拽调整 · 双击等分"
+                @pointerdown="onSplitterDown"
+                @dblclick="onSplitterDblClick"
+              >
+                <span
+                  class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+                  :class="arrangement === 'horizontal' ? 'h-[2px] w-8' : 'h-8 w-[2px]'"
+                  :style="{ background: splitterDragging ? 'var(--accent)' : 'var(--line-strong)' }"
+                />
+              </div>
+            </div>
+          </div>
+        </template>
       </div>
     </div>
 

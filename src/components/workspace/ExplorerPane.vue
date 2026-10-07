@@ -21,7 +21,6 @@ import {
   PinOff,
   RefreshCw,
   Scissors,
-  Search,
   StopCircle,
   TextSelect,
   Trash2,
@@ -80,6 +79,18 @@ const connectionId = computed(
   () => workspace.tabs.find((t) => t.id === props.tabId)?.connectionId ?? "",
 );
 const profileId = computed(() => conn.value?.profile.id ?? "");
+/** 双栏时本标签显示窗格关闭按钮 */
+const isDualPane = computed(
+  () => (workspace.tabs.find((t) => t.id === props.tabId)?.panes.length ?? 1) > 1,
+);
+
+/** 点击/右键切换活动窗格（Files Pane_PointerPressed/GotFocus：按钮/输入框上按下除外，
+ *  切换时清空另一窗格选择——setActivePane 内处理） */
+function activatePane(e: Event) {
+  if (!isActivePane() && !(e.target instanceof HTMLElement && e.target.closest("button, input, textarea"))) {
+    workspace.setActivePane(props.paneId);
+  }
+}
 
 /** 活动窗格检查：快捷键/侧键只作用于活动窗格（双栏语义，ShellPanesPage ActivePane） */
 function isActivePane() {
@@ -92,47 +103,7 @@ function onOpenFile(entry: FileEntry) {
   if (cid) void editor.openEntry(entry, explorer.cwd, cid);
 }
 
-/** —— 地址栏搜索：面包屑收缩 + 搜索框展开（即时过滤当前目录；
- *  Enter / 下拉提示项进入递归结果模式） —— */
-const searchOpen = ref(false);
-/** 搜索框聚焦态（下拉提示/历史仅聚焦时展示） */
-const searchFocused = ref(false);
-
-function toggleSearch() {
-  if (searchOpen.value) {
-    closeSearch();
-  } else {
-    // 只展开，不抢焦点——用户想输入时自己点搜索框
-    searchOpen.value = true;
-  }
-}
-
-function closeSearch() {
-  searchOpen.value = false;
-  explorer.exitSearch(true);
-}
-
-/** 搜索框 Enter：非空词进入递归搜索（当前目录为根） */
-function onSearchEnter() {
-  if (explorer.searchQuery.trim()) {
-    explorer.startRecursiveSearch(explorer.searchQuery);
-  }
-}
-
-/** 搜索框 Esc：结果模式先退出回原目录，否则收起搜索框 */
-function onSearchEsc() {
-  if (explorer.searchSession) {
-    explorer.exitSearch(true);
-  } else {
-    closeSearch();
-  }
-}
-
-/** 下拉提示项点击（mousedown.prevent 保住输入框焦点） */
-function onSuggestionSearch(query: string) {
-  explorer.searchQuery = query;
-  explorer.startRecursiveSearch(query);
-}
+/** —— 地址栏搜索已抽为 SearchBox 组件（步骤 3，随全局工具按钮经 #actions 注入） —— */
 
 /** 右键项在多选集合内 → 整个集合；否则单项 / 当前选择（Delete 同款规则） */
 function resolveTargetNames(entry: FileEntry | null): string[] | null {
@@ -827,8 +798,12 @@ function onKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="flex min-w-0 flex-1 flex-col gap-1">
-    <!-- 地址行卡（Win11：后退/前进/刷新在地址栏左侧）；#actions 插槽承载全局按钮 -->
+  <div
+    class="flex min-w-0 flex-1 flex-col gap-1"
+    @pointerdown="activatePane"
+    @contextmenu="activatePane"
+  >
+    <!-- 地址行卡（Win11：后退/前进/刷新在地址栏左侧）；#actions 插槽承载搜索框与全局按钮 -->
     <div
       class="flex h-12 shrink-0 items-center gap-1 rounded-lg px-1"
       :style="{ background: 'var(--toolbar)', border: '1px solid var(--line)' }"
@@ -875,97 +850,27 @@ function onKeydown(e: KeyboardEvent) {
         <RefreshCw :size="15" :class="explorer.loading && 'animate-spin'" />
       </button>
 
-      <!-- 面包屑 ⇄ 搜索框：面包屑左对齐固定、从右缘被裁剪让位；搜索框自身宽度动画 -->
+      <!-- 面包屑（搜索框经 #actions 注入，位置在其右侧与现状一致） -->
       <div class="mx-1.5 flex min-w-0 flex-1 items-center gap-1.5">
         <div class="min-w-0 flex-1 overflow-hidden">
           <Breadcrumbs :pane-id="paneId" />
         </div>
-
-        <div
-          class="flex h-[34px] shrink-0 items-center rounded-[4px]"
-          :class="searchOpen ? 'overflow-visible' : 'overflow-hidden'"
-          :style="{
-            width: searchOpen ? '250px' : '0px',
-            padding: searchOpen ? '0px 10px' : '0px',
-            borderWidth: searchOpen ? '1px' : '0px',
-            borderStyle: 'solid',
-            borderColor: 'var(--line)',
-            background: 'var(--sidebar)',
-            transition:
-              'width 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-width 0.1s linear, padding 0.1s linear',
-          }"
-        >
-          <div class="relative flex h-full w-[228px] shrink-0 items-center gap-1.5">
-            <Search :size="14" class="shrink-0 text-dim" />
-            <input
-              v-model="explorer.searchQuery"
-              class="h-full min-w-0 flex-1 bg-transparent text-sm text-ink outline-none"
-              placeholder="搜索当前目录"
-              aria-label="搜索当前目录"
-              @focus="searchFocused = true"
-              @blur="searchFocused = false"
-              @keydown.enter.prevent="onSearchEnter"
-              @keydown.esc.stop="onSearchEsc"
-            />
-            <button
-              v-if="explorer.searchQuery"
-              type="button"
-              class="btn-icon h-6 w-6 shrink-0"
-              title="清空"
-              aria-label="清空搜索"
-              @click="explorer.searchQuery = ''"
-            >
-              <X :size="13" />
-            </button>
-
-            <!-- 下拉提示：输入非空 → 「在子目录中搜索」；聚焦且为空 → 搜索历史（点击即执行） -->
-            <Transition name="popup">
-              <div
-                v-if="searchOpen && searchFocused && (explorer.searchQuery.trim() || (!explorer.searchQuery && explorer.searchHistory.length))"
-                class="absolute top-[38px] right-0 z-50 min-w-full overflow-hidden rounded-lg shadow-xl"
-                :style="{ background: 'var(--surface-solid)', border: '1px solid var(--stroke-flyout)' }"
-              >
-                <template v-if="explorer.searchQuery.trim()">
-                  <button
-                    type="button"
-                    class="flex h-8 w-full items-center gap-2.5 px-3 text-left text-sm whitespace-nowrap transition-colors hover:bg-fill-subtle"
-                    @mousedown.prevent="onSuggestionSearch(explorer.searchQuery.trim())"
-                  >
-                    <FolderSearch :size="14" class="shrink-0 text-dim" />
-                    在子目录中搜索「{{ explorer.searchQuery.trim() }}」
-                  </button>
-                </template>
-                <template v-else>
-                  <button
-                    v-for="q in explorer.searchHistory"
-                    :key="q"
-                    type="button"
-                    class="flex h-8 w-full items-center gap-2.5 px-3 text-left text-sm whitespace-nowrap transition-colors hover:bg-fill-subtle"
-                    @mousedown.prevent="onSuggestionSearch(q)"
-                  >
-                    <History :size="14" class="shrink-0 text-faint" />
-                    {{ q }}
-                  </button>
-                </template>
-              </div>
-            </Transition>
-          </div>
-        </div>
       </div>
 
+      <!-- 全局工具（搜索框/终端/传输/分屏）：父组件注入，单栏时嵌本行、双栏时为空 -->
+      <slot name="actions" />
+
+      <!-- 窗格关闭按钮（仅双栏时显示，Files CloseActivePane） -->
       <button
+        v-if="isDualPane"
         type="button"
         class="btn-icon"
-        :class="searchOpen && 'text-accent'"
-        :title="searchOpen ? '关闭搜索' : '搜索当前目录'"
-        aria-label="搜索"
-        @click="toggleSearch"
+        title="关闭此窗格"
+        aria-label="关闭此窗格"
+        @click="workspace.closePane(paneId)"
       >
-        <Search :size="16" />
+        <X :size="15" />
       </button>
-
-      <!-- 全局工具按钮（终端/传输中心/分屏）：父组件注入 -->
-      <slot name="actions" />
     </div>
 
     <!-- 文件区：FileArea 卡（8 圆角 + 1px 描边） -->

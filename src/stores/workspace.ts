@@ -23,6 +23,10 @@ export interface WorkspaceTab {
   alias: string;
   panes: WorkspacePane[];
   activePaneId: string;
+  /** 双栏排列（Files ShellPaneArrangement：按分隔条方向命名——vertical=左右并排，horizontal=上下堆叠；null=单窗格） */
+  arrangement: "vertical" | "horizontal" | null;
+  /** 窗格 1 占比（双栏分隔条位置，%；双击分隔条复位 50） */
+  paneRatio: number;
   /** 标签标题 = 当前目录名（导航实时更新，Workspace 层经 explorer 回写） */
   title: string;
 }
@@ -72,6 +76,8 @@ export const useWorkspaceStore = defineStore("workspace", () => {
       alias,
       panes: [pane],
       activePaneId: pane.id,
+      arrangement: null,
+      paneRatio: 50,
       title: alias,
     };
   }
@@ -173,6 +179,53 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     })();
   }
 
+  /** —— 双栏分屏（Files ShellPanesPage：每标签最多 2 窗格，共享标签的连接） —— */
+
+  /** 打开第二窗格（Files OpenSecondaryPane：新窗格进入当前活动窗格的目录） */
+  function openSecondaryPane(arrangement: "vertical" | "horizontal", cwd: string) {
+    const tab = activeTab.value;
+    if (!tab || tab.panes.length >= 2) return;
+    const pane: WorkspacePane = { id: newId() };
+    tab.panes.push(pane);
+    tab.arrangement = arrangement;
+    tab.paneRatio = 50;
+    initPane(pane.id, tab.connectionId, cwd, tab.profileId, cwd);
+    return pane;
+  }
+
+  /** 关闭指定窗格（余一窗格时回到单窗格布局） */
+  function closePane(paneId: string) {
+    const tab = activeTab.value;
+    if (!tab || tab.panes.length < 2) return;
+    const idx = tab.panes.findIndex((p) => p.id === paneId);
+    if (idx < 0) return;
+    disposeExplorer(paneId);
+    tab.panes.splice(idx, 1);
+    tab.arrangement = null;
+    if (tab.activePaneId === paneId) {
+      tab.activePaneId = tab.panes[Math.max(0, idx - 1)].id;
+    }
+  }
+
+  /** 切换活动窗格（Files Pane_GotFocus：点击/右键另一窗格聚焦时清空原活动窗格的选择） */
+  function setActivePane(paneId: string) {
+    const tab = activeTab.value;
+    if (!tab || paneId === tab.activePaneId) return;
+    if (tab.panes.some((p) => p.id === paneId)) {
+      useExplorer(tab.activePaneId).clearSelection();
+      tab.activePaneId = paneId;
+    }
+  }
+
+  /** 焦点切到另一窗格（Files FocusOtherPaneAction Ctrl+Shift+→；← 为对称补充） */
+  function focusOtherPane() {
+    const tab = activeTab.value;
+    if (!tab || tab.panes.length < 2) return;
+    const idx = tab.panes.findIndex((p) => p.id === tab.activePaneId);
+    const other = tab.panes[(idx + 1) % tab.panes.length];
+    setActivePane(other.id);
+  }
+
   /** 断开/离开工作区：回收全部 explorer 实例并清空结构 */
   function resetAll() {
     for (const tab of tabs.value) {
@@ -207,6 +260,10 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     closeTabsToLeft,
     moveTab,
     initPane,
+    openSecondaryPane,
+    closePane,
+    setActivePane,
+    focusOtherPane,
     resetAll,
     activeExplorer,
   };
