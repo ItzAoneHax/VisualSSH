@@ -39,6 +39,7 @@ pub fn run() {
             commands::transfer::ssh_transfer_list,
             commands::transfer::ssh_transfer_cancel,
             commands::transfer::ssh_transfer_remove,
+            commands::transfer::local_file_meta,
             commands::terminal::ssh_open_terminal,
             commands::terminal::ssh_terminal_write,
             commands::terminal::ssh_terminal_resize,

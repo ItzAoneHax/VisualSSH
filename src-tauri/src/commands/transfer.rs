@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::error::{Error, Result};
@@ -8,6 +9,31 @@ use crate::transfer::{
     emit_state, finish_failed, run_download, run_upload, TransferHandle, TransferInfo,
     TransferManager,
 };
+
+/// 本地文件元数据（上传冲突对话框展示传入项的大小/修改时间）。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalFileMeta {
+    pub size: u64,
+    pub mtime: Option<i64>,
+}
+
+/// 逐个读取本地文件元数据；读不到的槽位为 null（前端显示 —）。
+#[tauri::command]
+pub async fn local_file_meta(paths: Vec<String>) -> Result<Vec<Option<LocalFileMeta>>> {
+    let mut out = Vec::with_capacity(paths.len());
+    for path in &paths {
+        out.push(tokio::fs::metadata(path).await.ok().map(|m| LocalFileMeta {
+            size: m.len(),
+            mtime: m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64),
+        }));
+    }
+    Ok(out)
+}
 
 /// 取路径最后一段做展示名（兼容 / 与 \）。
 fn base_name(path: &str) -> String {

@@ -35,19 +35,22 @@ import type { MenuItem } from "@/components/common/DropdownMenu.vue";
 import Modal from "@/components/common/Modal.vue";
 import Breadcrumbs from "@/components/explorer/Breadcrumbs.vue";
 import ChmodDialog from "@/components/explorer/ChmodDialog.vue";
+import ConflictDialog from "@/components/explorer/ConflictDialog.vue";
 import FileTable from "@/components/explorer/FileTable.vue";
 import EditorDrawer from "@/components/workspace/EditorDrawer.vue";
 import TerminalPanel from "@/components/workspace/TerminalPanel.vue";
 import TransferCenter from "@/components/workspace/TransferCenter.vue";
 import { useConnectionsStore } from "@/stores/connections";
+import { useConflictStore, type IncomingItem } from "@/stores/conflicts";
 import { useEditorStore } from "@/stores/editor";
 import { useExplorerStore } from "@/stores/explorer";
 import { useSettingsStore } from "@/stores/settings";
 import { useTerminalStore } from "@/stores/terminal";
 import { useTransferStore } from "@/stores/transfer";
 import type { FileEntry } from "@/types";
-import { copyText, joinPath } from "@/utils/format";
+import { copyText, joinPath, pathBaseName } from "@/utils/format";
 import { copyVirtualFiles, readClipboardFiles } from "@/api/clipboard";
+import { localFileMeta } from "@/api/transfer";
 
 const emit = defineEmits<{
   disconnect: [];
@@ -56,6 +59,7 @@ const emit = defineEmits<{
 const connections = useConnectionsStore();
 const explorer = useExplorerStore();
 const transfers = useTransferStore();
+const conflicts = useConflictStore();
 const editor = useEditorStore();
 const terminalStore = useTerminalStore();
 const settings = useSettingsStore();
@@ -123,7 +127,35 @@ function showCopyHint(count: number) {
   copyHintTimer = setTimeout(() => (copyHint.value = ""), 3000);
 }
 
-/** Ctrl+V：读系统剪贴板文件列表（HDROP），逐个上传到当前目录 */
+/** 上传前冲突解析（Ctrl+V 与拖放共用）：有同名先弹对话框，取消/出错返回 null */
+async function resolveUploadConflicts(
+  localPaths: string[],
+): Promise<{ path: string; finalName: string }[] | null> {
+  const connectionId = connections.active?.connectionId;
+  if (!connectionId) return null;
+  const metas = await localFileMeta(localPaths).catch(() => []);
+  const incoming: IncomingItem[] = localPaths.map((p, i) => ({
+    name: pathBaseName(p),
+    size: metas[i]?.size ?? null,
+    mtime: metas[i]?.mtime ?? null,
+  }));
+  try {
+    const decisions = await conflicts.resolve(connectionId, explorer.cwd, incoming);
+    if (!decisions) return null;
+    const out: { path: string; finalName: string }[] = [];
+    for (const d of decisions) {
+      if (d.action !== "proceed") continue;
+      const path = localPaths.find((lp) => pathBaseName(lp) === d.name);
+      if (path) out.push({ path, finalName: d.finalName });
+    }
+    return out;
+  } catch (e) {
+    explorer.error = e instanceof Error ? e.message : String(e);
+    return null;
+  }
+}
+
+/** Ctrl+V：读系统剪贴板文件列表（HDROP），过冲突检查后逐个上传到当前目录 */
 async function pasteFromClipboard() {
   const connectionId = connections.active?.connectionId;
   if (!connectionId) return;
@@ -134,8 +166,10 @@ async function pasteFromClipboard() {
     return;
   }
   if (!localPaths.length) return;
-  for (const p of localPaths) {
-    await transfers.startUpload(connectionId, p, explorer.cwd);
+  const resolved = await resolveUploadConflicts(localPaths);
+  if (!resolved) return;
+  for (const item of resolved) {
+    await transfers.startUpload(connectionId, item.path, explorer.cwd, item.finalName);
   }
 }
 
@@ -316,7 +350,7 @@ onMounted(async () => {
   window.addEventListener("keydown", onKeydown);
   // 系统文件拖入上传（WebView2 dragDropEnabled 默认开启；浏览器预览跳过）
   if ("__TAURI_INTERNALS__" in window) {
-    unlistenDrag = await getCurrentWebview().onDragDropEvent((event) => {
+    unlistenDrag = await getCurrentWebview().onDragDropEvent(async (event) => {
       const payload = event.payload;
       if (payload.type === "enter") {
         // 非文件拖拽（paths 为空）不显示覆盖层
@@ -327,8 +361,10 @@ onMounted(async () => {
         dragOver.value = false;
         const connectionId = connections.active?.connectionId;
         if (!connectionId) return;
-        for (const path of payload.paths) {
-          void transfers.startUpload(connectionId, path, explorer.cwd);
+        const resolved = await resolveUploadConflicts(payload.paths);
+        if (!resolved) return;
+        for (const item of resolved) {
+          void transfers.startUpload(connectionId, item.path, explorer.cwd, item.finalName);
         }
       }
     });
@@ -668,5 +704,8 @@ function onKeydown(e: KeyboardEvent) {
         if (target) explorer.chmodEntry(target.name, mode);
       }"
     />
+
+    <!-- 上传/粘贴冲突：同名项逐个决策（生成新名称/替换/跳过），支持应用到所有 -->
+    <ConflictDialog />
   </div>
 </template>

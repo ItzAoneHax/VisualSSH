@@ -4,6 +4,8 @@ import { X } from "@lucide/vue";
 defineProps<{
   title: string;
   open: boolean;
+  /** 覆盖默认 max-w-md 的内容宽度（如冲突/属性对话框），单位 px */
+  maxWidth?: number;
 }>();
 
 const emit = defineEmits<{
@@ -32,7 +34,7 @@ const emit = defineEmits<{
           aria-modal="true"
           :aria-label="title"
           class="w-full max-w-md rounded-lg p-6 shadow-2xl"
-          :style="{ background: 'var(--surface-solid)', border: '1px solid var(--stroke-flyout)' }"
+          :style="{ background: 'var(--surface-solid)', border: '1px solid var(--stroke-flyout)', maxWidth: maxWidth ? `${maxWidth}px` : undefined }"
         >
           <header class="mb-4 flex items-start justify-between gap-4">
             <h2 class="text-xl leading-7 font-semibold">{{ title }}</h2>

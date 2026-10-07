@@ -109,9 +109,15 @@ export const useTransferStore = defineStore("transfer", () => {
     );
   }
 
-  async function startUpload(connectionId: string, localPath: string, remoteDir: string) {
+  async function startUpload(
+    connectionId: string,
+    localPath: string,
+    remoteDir: string,
+    /** 冲突改名后的远端名；缺省用本地文件名 */
+    remoteName?: string,
+  ) {
     const id = crypto.randomUUID();
-    const fileName = localBaseName(localPath);
+    const fileName = remoteName ?? localBaseName(localPath);
     rows.value.unshift({
       id,
       direction: "upload",

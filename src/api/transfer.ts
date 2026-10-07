@@ -34,3 +34,13 @@ export function cancelTransfer(transferId: string): Promise<boolean> {
 export function removeTransfer(transferId: string): Promise<boolean> {
   return invoke("ssh_transfer_remove", { transferId });
 }
+
+/** 本地文件元数据（冲突对话框展示传入项）；读不到的槽位为 null */
+export interface LocalFileMeta {
+  size: number;
+  mtime: number | null;
+}
+
+export function localFileMeta(paths: string[]): Promise<(LocalFileMeta | null)[]> {
+  return invoke("local_file_meta", { paths });
+}

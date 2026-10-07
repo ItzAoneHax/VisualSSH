@@ -46,6 +46,11 @@ export function parentPath(path: string): string {
   return idx <= 0 ? "/" : path.slice(0, idx);
 }
 
+/** 本地/远端路径的最后一段（兼容 / 与 \） */
+export function pathBaseName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
 /** 详情视图「类型」列文案 */
 export function kindLabel(kind: FileEntry["kind"]): string {
   switch (kind) {

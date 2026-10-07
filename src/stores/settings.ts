@@ -13,6 +13,8 @@ export type SortPriority = "folders" | "files" | "mixed";
 export type ImageFit = "none" | "fill" | "uniform" | "uniformToFill";
 /** 背景图对齐（单轴：前 / 中 / 后） */
 export type ImageAlign = "start" | "center" | "end";
+/** 冲突解决策略（Files ConflictsResolveOption 的 newName/replace/skip；custom 仅对话框内聚合态，不持久化） */
+export type ConflictResolveOption = "newName" | "replace" | "skip";
 
 const STORAGE_KEY = "visualssh:settings:v1";
 
@@ -49,6 +51,8 @@ export interface AppSettings {
   bgImageVAlign: ImageAlign;
   /** 背景图水平对齐 */
   bgImageHAlign: ImageAlign;
+  /** 冲突对话框「应用到所有」记住的上次策略（Files GeneralSettingsService.ConflictsResolveOption，默认生成新名称） */
+  conflictsResolveOption: ConflictResolveOption;
 }
 
 const DEFAULTS: AppSettings = {
@@ -70,6 +74,7 @@ const DEFAULTS: AppSettings = {
   bgImageFit: "uniformToFill",
   bgImageVAlign: "center",
   bgImageHAlign: "center",
+  conflictsResolveOption: "newName",
 };
 
 function load(): AppSettings {
