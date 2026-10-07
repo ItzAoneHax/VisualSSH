@@ -374,6 +374,38 @@ pub async fn ssh_search_cancel(
     Ok(search.cancel(&search_id))
 }
 
+/// 磁盘容量快照（总量 = blocks×frsize，可用 = bavail×frsize）。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FsInfo {
+    pub total: u64,
+    pub free: u64,
+}
+
+/// 读取路径所在文件系统容量；服务器不支持 statvfs 扩展或查询失败时返回 None
+/// （前端容量条整体不渲染，不报错——DrivesWidget.ShowDriveDetails 的 None 语义）。
+#[tauri::command]
+pub async fn ssh_fs_info(
+    connection_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Option<FsInfo>> {
+    let handle = state
+        .get(&connection_id)
+        .ok_or_else(|| Error::NoSession(connection_id.clone()))?;
+    let session = handle.session.lock().await;
+    match tokio::time::timeout(IO_TIMEOUT, session.fs_info(&path)).await {
+        Ok(Ok(Some(statvfs))) => {
+            let frsize = statvfs.fragment_size;
+            Ok(Some(FsInfo {
+                total: statvfs.blocks * frsize,
+                free: statvfs.blocks_avail * frsize,
+            }))
+        }
+        _ => Ok(None),
+    }
+}
+
 /// 断开并移除会话池中的连接；同时取消该连接的全部传输/统计并关闭其全部终端。
 #[tauri::command]
 pub async fn ssh_disconnect(

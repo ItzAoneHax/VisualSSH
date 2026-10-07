@@ -7,6 +7,7 @@ use russh::keys::{HashAlg, PrivateKeyWithHashAlg};
 use russh::ChannelMsg;
 use russh_sftp::client::fs::File as RemoteFile;
 use russh_sftp::client::SftpSession;
+use russh_sftp::extensions::Statvfs;
 use russh_sftp::protocol::{FileAttributes, OpenFlags};
 use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -219,6 +220,14 @@ impl SshSession {
             .read_link(path)
             .await
             .map_err(|e| Error::Sftp(format!("读取链接 {path} 目标失败: {e}")))
+    }
+
+    /// 读取路径所在文件系统容量（statvfs@openssh.com）；服务器不支持该扩展时返回 None。
+    pub async fn fs_info(&self, path: &str) -> Result<Option<Statvfs>> {
+        self.sftp
+            .fs_info(path)
+            .await
+            .map_err(|e| Error::Sftp(format!("读取 {path} 所在文件系统容量失败: {e}")))
     }
 
     /// 打开远端文件只读句柄（下载流用；句柄持有期间可释放会话锁继续浏览）。

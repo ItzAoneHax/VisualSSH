@@ -163,6 +163,17 @@ export function searchCancel(searchId: string): Promise<boolean> {
   return invoke("ssh_search_cancel", { searchId });
 }
 
+/** 文件系统容量（fs_info；服务器不支持 statvfs 时为 null） */
+export interface FsInfo {
+  total: number;
+  free: number;
+}
+
+/** 读取路径所在文件系统容量；None = 服务器不支持，UI 整体不渲染 */
+export function fsInfo(connectionId: string, path: string): Promise<FsInfo | null> {
+  return invoke("ssh_fs_info", { connectionId, path });
+}
+
 /** 指纹变更经用户确认后，更新 known_hosts 记录（随后重连） */
 export function trustHost(
   host: string,

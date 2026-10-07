@@ -70,9 +70,11 @@ import {
 } from "@/api/clipboard";
 import {
   execSsh,
+  fsInfo,
   listDir,
   renameSsh,
   type ExecOutput,
+  type FsInfo,
 } from "@/api/ssh";
 import { localFileMeta } from "@/api/transfer";
 
@@ -514,6 +516,49 @@ const searchDirName = computed(() => {
   const dir = explorer.searchSession?.dir ?? "";
   return dir === "/" ? "/" : (pathBaseName(dir) || dir);
 });
+
+/** —— F 状态栏磁盘容量条：导航到新目录读 fs_info(cwd)；不支持则整体不渲染 —— */
+const diskInfo = ref<FsInfo | null>(null);
+let diskSeq = 0;
+
+const diskUsed = computed(() =>
+  diskInfo.value ? diskInfo.value.total - diskInfo.value.free : 0,
+);
+const diskPercent = computed(() =>
+  diskInfo.value && diskInfo.value.total > 0
+    ? Math.min(100, (diskUsed.value / diskInfo.value.total) * 100)
+    : 0,
+);
+/** 剩余 <10% 转 danger（DrivesWidget DriveSpaceProgressBar 语义） */
+const diskLow = computed(
+  () => !!diskInfo.value && diskInfo.value.free / diskInfo.value.total < 0.1,
+);
+const diskTitle = computed(() =>
+  diskInfo.value
+    ? `已用 ${diskUsed.value} B，共 ${diskInfo.value.total} B（剩余 ${Math.round(100 - diskPercent.value)}%）`
+    : "",
+);
+
+watch(
+  () => [connections.active?.connectionId, explorer.cwd] as const,
+  ([cid, dir]) => {
+    if (!cid) {
+      diskInfo.value = null;
+      return;
+    }
+    const seq = ++diskSeq;
+    void fsInfo(cid, dir).then(
+      (info) => {
+        // 过期响应丢弃（快速连续导航时）
+        if (seq === diskSeq) diskInfo.value = info;
+      },
+      () => {
+        if (seq === diskSeq) diskInfo.value = null;
+      },
+    );
+  },
+  { immediate: true },
+);
 
 /** 文件区右键菜单状态 */
 const ctxMenu = ref<{ open: boolean; x: number; y: number; entry: FileEntry | null }>({
@@ -1212,6 +1257,35 @@ function onKeydown(e: KeyboardEvent) {
         </span>
       </span>
       <span class="flex min-w-0 items-baseline gap-3">
+        <!-- 磁盘容量条（DrivesWidget DriveSpaceProgressBar：120px 细条 + 已用/总量缩写，剩余<10% 转 danger） -->
+        <span
+          v-if="diskInfo"
+          class="flex shrink-0 items-center gap-2 self-center"
+          :title="diskTitle"
+        >
+          <span
+            class="relative block h-[2px] w-[120px] overflow-hidden rounded-full"
+            :style="{ background: 'var(--line-strong)' }"
+            role="progressbar"
+            :aria-valuenow="Math.round(diskPercent)"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          >
+            <span
+              class="absolute inset-y-0 left-0 rounded-full"
+              :style="{
+                width: `${diskPercent}%`,
+                background: diskLow ? 'var(--danger)' : 'var(--accent)',
+              }"
+            />
+          </span>
+          <span
+            class="font-mono text-[11px]"
+            :style="{ color: diskLow ? 'var(--danger)' : undefined }"
+          >
+            {{ formatSize(diskUsed) }} / {{ formatSize(diskInfo.total) }}
+          </span>
+        </span>
         <span class="flex min-w-0 items-baseline gap-1.5" :title="`${connections.active.profile.username}@${connections.active.profile.host}`">
           <span class="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-live" aria-hidden="true" />
           <span class="truncate font-medium">{{ connections.active.alias }}</span>
