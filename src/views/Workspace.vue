@@ -15,6 +15,7 @@ import {
   FolderTree,
   HardDrive,
   House,
+  Info,
   Lock,
   Pencil,
   RefreshCw,
@@ -37,6 +38,7 @@ import Breadcrumbs from "@/components/explorer/Breadcrumbs.vue";
 import ChmodDialog from "@/components/explorer/ChmodDialog.vue";
 import ConflictDialog from "@/components/explorer/ConflictDialog.vue";
 import FileTable from "@/components/explorer/FileTable.vue";
+import PropertiesDialog from "@/components/explorer/PropertiesDialog.vue";
 import EditorDrawer from "@/components/workspace/EditorDrawer.vue";
 import TerminalPanel from "@/components/workspace/TerminalPanel.vue";
 import TransferCenter from "@/components/workspace/TransferCenter.vue";
@@ -204,6 +206,26 @@ const ctxMenu = ref<{ open: boolean; x: number; y: number; entry: FileEntry | nu
 /** 删除确认与权限编辑的目标条目（删除支持批量） */
 const deleteTargets = ref<FileEntry[] | null>(null);
 const chmodTarget = ref<FileEntry | null>(null);
+/** 属性对话框目标（单选/多选） */
+const propertiesTargets = ref<FileEntry[] | null>(null);
+
+/** 属性入口（右键菜单 / Alt+Enter）：右键项在多选集合内时对整个集合生效 */
+function openProperties(entry: FileEntry | null) {
+  if (entry && explorer.isSelected(entry.name) && explorer.selectedNames.size > 1) {
+    propertiesTargets.value = [...explorer.selectedNames]
+      .map((n) => explorer.entryByName(n))
+      .filter((e): e is FileEntry => !!e);
+    return;
+  }
+  if (entry) {
+    propertiesTargets.value = [entry];
+    return;
+  }
+  const targets = [...explorer.selectedNames]
+    .map((n) => explorer.entryByName(n))
+    .filter((e): e is FileEntry => !!e);
+  if (targets.length) propertiesTargets.value = targets;
+}
 
 /** 单条删除（右键菜单）或按当前多选批量（Delete 键）。
  *  设置关闭「删除前确认」时跳过对话框直接执行（Files ShowConfirmationWhenDeletingItems）。 */
@@ -292,6 +314,8 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
     { key: "delete", label: "删除", icon: Trash2 },
     { key: "sep3", label: "", separator: true },
     { key: "chmod", label: "修改权限", icon: Lock },
+    { key: "sep4", label: "", separator: true },
+    { key: "properties", label: "属性", icon: Info },
   );
   return items;
 });
@@ -339,6 +363,9 @@ async function onCtxMenuSelect(key: string) {
       break;
     case "chmod":
       chmodTarget.value = entry;
+      break;
+    case "properties":
+      openProperties(entry);
       break;
   }
 }
@@ -415,6 +442,12 @@ function onKeydown(e: KeyboardEvent) {
     return;
   }
   if (!e.altKey) return;
+  if (e.key === "Enter" && explorer.selectedNames.size > 0) {
+    // Alt+Enter：属性（Files OpenPropertiesAction 热键）
+    e.preventDefault();
+    openProperties(null);
+    return;
+  }
   if (e.key === "ArrowUp") {
     e.preventDefault();
     explorer.up();
@@ -707,5 +740,20 @@ function onKeydown(e: KeyboardEvent) {
 
     <!-- 上传/粘贴冲突：同名项逐个决策（生成新名称/替换/跳过），支持应用到所有 -->
     <ConflictDialog />
+
+    <!-- 属性：单页（类型/位置/时间/属主组/权限/链接目标 + 递归统计），单选可改名 -->
+    <PropertiesDialog
+      :targets="propertiesTargets"
+      :parent-dir="explorer.cwd"
+      @close="propertiesTargets = null"
+      @rename="(oldName, newName) => {
+        propertiesTargets = null;
+        explorer.renameEntry(oldName, newName);
+      }"
+      @chmod="(entry) => {
+        propertiesTargets = null;
+        chmodTarget = entry;
+      }"
+    />
   </div>
 </template>

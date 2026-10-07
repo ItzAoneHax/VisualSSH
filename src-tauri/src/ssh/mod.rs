@@ -5,3 +5,4 @@ mod session;
 pub use fs::FileEntry;
 pub use known_hosts::{HostEntry, KnownHosts};
 pub use session::{AuthMethod, HostKeyRecord, SshSession};
+pub(crate) use session::join_remote;

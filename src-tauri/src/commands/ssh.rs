@@ -288,6 +288,22 @@ pub async fn ssh_read_file(
         .map_err(|_| Error::Timeout)?
 }
 
+/// 读取符号链接目标（属性对话框）。
+#[tauri::command]
+pub async fn ssh_read_link(
+    connection_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<String> {
+    let handle = state
+        .get(&connection_id)
+        .ok_or_else(|| Error::NoSession(connection_id.clone()))?;
+    let session = handle.session.lock().await;
+    tokio::time::timeout(IO_TIMEOUT, session.read_link(&path))
+        .await
+        .map_err(|_| Error::Timeout)?
+}
+
 /// 原子写回：同目录临时文件落盘后 rename 替换。
 #[tauri::command]
 pub async fn ssh_write_file(
@@ -305,16 +321,18 @@ pub async fn ssh_write_file(
         .map_err(|_| Error::Timeout)?
 }
 
-/// 断开并移除会话池中的连接；同时取消该连接的全部传输并关闭其全部终端。
+/// 断开并移除会话池中的连接；同时取消该连接的全部传输/统计并关闭其全部终端。
 #[tauri::command]
 pub async fn ssh_disconnect(
     connection_id: String,
     state: State<'_, AppState>,
     transfers: State<'_, crate::transfer::TransferManager>,
     terminals: State<'_, std::sync::Arc<crate::terminal::TerminalManager>>,
+    stats: State<'_, std::sync::Arc<crate::stats::StatsManager>>,
 ) -> Result<()> {
     transfers.cancel_for_connection(&connection_id);
     terminals.close_for_connection(&connection_id);
+    stats.cancel_for_connection(&connection_id);
     if let Some(handle) = state.remove(&connection_id) {
         let session = handle.session.lock().await;
         session.disconnect().await;

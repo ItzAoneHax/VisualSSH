@@ -14,6 +14,12 @@ pub struct FileEntry {
     pub permissions: String,
     /// Unix 秒级时间戳
     pub mtime: Option<i64>,
+    /// 属主名；服务器未返回名字时回退 uid 数字，两者皆无则 null
+    pub owner: Option<String>,
+    /// 组名；回退规则同 owner
+    pub group: Option<String>,
+    /// 访问时间（Unix 秒级）；SFTP v3 无创建时间
+    pub atime: Option<i64>,
 }
 
 pub(crate) fn to_file_entries(read_dir: ReadDir) -> Vec<FileEntry> {
@@ -32,6 +38,15 @@ pub(crate) fn to_file_entries(read_dir: ReadDir) -> Vec<FileEntry> {
                 size: metadata.size.unwrap_or(0),
                 permissions: mode_string(metadata.permissions, kind),
                 mtime: metadata.mtime.map(|t| t as i64),
+                owner: metadata
+                    .user
+                    .clone()
+                    .or_else(|| metadata.uid.map(|u| u.to_string())),
+                group: metadata
+                    .group
+                    .clone()
+                    .or_else(|| metadata.gid.map(|g| g.to_string())),
+                atime: metadata.atime.map(|t| t as i64),
             }
         })
         .filter(|e| e.name != "." && e.name != "..")

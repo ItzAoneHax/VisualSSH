@@ -80,6 +80,34 @@ export function disconnectSsh(connectionId: string): Promise<void> {
   return invoke("ssh_disconnect", { connectionId });
 }
 
+/** 读取符号链接目标（属性对话框） */
+export function readLinkSsh(connectionId: string, path: string): Promise<string> {
+  return invoke("ssh_read_link", { connectionId, path });
+}
+
+/** 目录递归统计进度事件负载（props://stats:{statsId}） */
+export interface DirStatsProgress {
+  statsId: string;
+  files: number;
+  dirs: number;
+  bytes: number;
+  done: boolean;
+}
+
+/** 启动目录递归统计；进度经 props://stats:{statsId} 推送，subpaths 为多选子项名 */
+export function dirStats(
+  connectionId: string,
+  path: string,
+  subpaths?: string[],
+): Promise<void> {
+  return invoke("ssh_dir_stats", { connectionId, path, subpaths });
+}
+
+/** 请求取消统计任务 */
+export function dirStatsCancel(statsId: string): Promise<boolean> {
+  return invoke("ssh_dir_stats_cancel", { statsId });
+}
+
 /** 指纹变更经用户确认后，更新 known_hosts 记录（随后重连） */
 export function trustHost(
   host: string,

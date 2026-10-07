@@ -48,6 +48,12 @@ export interface FileEntry {
   permissions: string;
   /** Unix 秒级时间戳 */
   mtime: number | null;
+  /** 属主名（服务器未返回名字时回退 uid 数字；两者皆无为 null） */
+  owner?: string | null;
+  /** 组名（回退规则同 owner） */
+  group?: string | null;
+  /** 访问时间 Unix 秒级时间戳 */
+  atime?: number | null;
 }
 
 /** 测试连接的瞬时状态 */

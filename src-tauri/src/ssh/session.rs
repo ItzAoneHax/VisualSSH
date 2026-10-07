@@ -211,6 +211,14 @@ impl SshSession {
         Ok(fs::to_file_entries(read_dir))
     }
 
+    /// 读取符号链接目标（属性对话框用）。
+    pub async fn read_link(&self, path: &str) -> Result<String> {
+        self.sftp
+            .read_link(path)
+            .await
+            .map_err(|e| Error::Sftp(format!("读取链接 {path} 目标失败: {e}")))
+    }
+
     /// 打开远端文件只读句柄（下载流用；句柄持有期间可释放会话锁继续浏览）。
     pub async fn open_read(&self, path: &str) -> Result<RemoteFile> {
         self.sftp
@@ -401,7 +409,7 @@ impl SshSession {
 }
 
 /// 拼接远程路径（根目录单独处理，避免出现 //x）。
-fn join_remote(dir: &str, name: &str) -> String {
+pub(crate) fn join_remote(dir: &str, name: &str) -> String {
     if dir == "/" {
         format!("/{name}")
     } else {

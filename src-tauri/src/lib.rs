@@ -3,6 +3,7 @@ mod commands;
 mod error;
 mod ssh;
 mod state;
+mod stats;
 mod terminal;
 mod transfer;
 
@@ -12,6 +13,7 @@ pub fn run() {
         .manage(state::AppState::default())
         .manage(transfer::TransferManager::default())
         .manage(std::sync::Arc::new(terminal::TerminalManager::default()))
+        .manage(std::sync::Arc::new(stats::StatsManager::default()))
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::ssh_connect,
@@ -24,6 +26,7 @@ pub fn run() {
             commands::ssh_chmod,
             commands::ssh_read_file,
             commands::ssh_write_file,
+            commands::ssh_read_link,
             commands::ssh_disconnect,
             commands::ssh_trust_host,
             commands::ssh_known_hosts_list,
@@ -40,6 +43,8 @@ pub fn run() {
             commands::transfer::ssh_transfer_cancel,
             commands::transfer::ssh_transfer_remove,
             commands::transfer::local_file_meta,
+            commands::stats::ssh_dir_stats,
+            commands::stats::ssh_dir_stats_cancel,
             commands::terminal::ssh_open_terminal,
             commands::terminal::ssh_terminal_write,
             commands::terminal::ssh_terminal_resize,
