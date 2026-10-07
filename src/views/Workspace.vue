@@ -19,11 +19,13 @@ import {
   Pencil,
   RefreshCw,
   ScrollText,
+  Search,
   Settings,
   SquareTerminal,
   Trash2,
   TriangleAlert,
   Upload,
+  X,
 } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { nextTick } from "vue";
@@ -68,6 +70,23 @@ function onOpenFile(entry: FileEntry) {
 function onOpenTerminal() {
   const connectionId = connections.active?.connectionId;
   if (connectionId) void terminalStore.openIn(explorer.cwd, connectionId);
+}
+
+/** —— 地址栏搜索：面包屑收缩 + 搜索框展开（即时过滤当前目录） —— */
+const searchOpen = ref(false);
+
+function toggleSearch() {
+  if (searchOpen.value) {
+    closeSearch();
+  } else {
+    // 只展开，不抢焦点——用户想输入时自己点搜索框
+    searchOpen.value = true;
+  }
+}
+
+function closeSearch() {
+  searchOpen.value = false;
+  explorer.searchQuery = "";
 }
 
 /** Ctrl+C：多选文件静默下载到暂存目录，全部完成后写入系统剪贴板（HDROP） */
@@ -428,9 +447,55 @@ function onKeydown(e: KeyboardEvent) {
           <RefreshCw :size="15" :class="explorer.loading && 'animate-spin'" />
         </button>
 
-        <div class="mx-1.5 min-w-0 flex-1">
-          <Breadcrumbs />
+        <!-- 面包屑 ⇄ 搜索框：面包屑左对齐固定、从右缘被裁剪让位；搜索框自右缘展开 -->
+        <div class="mx-1.5 flex min-w-0 flex-1 items-center gap-1.5">
+          <div class="min-w-0 flex-1 overflow-hidden">
+            <Breadcrumbs />
+          </div>
+
+          <div
+            class="shrink-0 overflow-hidden"
+            :style="{
+              width: searchOpen ? '250px' : '0px',
+              transition: 'width 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+            }"
+          >
+            <div
+              class="flex h-[34px] w-[250px] items-center gap-1.5 rounded-[4px] px-2.5"
+              :style="{ background: 'var(--sidebar)', border: '1px solid var(--line)' }"
+            >
+              <Search :size="14" class="shrink-0 text-dim" />
+              <input
+                v-model="explorer.searchQuery"
+                class="h-full min-w-0 flex-1 bg-transparent text-sm text-ink outline-none"
+                placeholder="搜索当前目录"
+                aria-label="搜索当前目录"
+                @keydown.esc.stop="closeSearch"
+              />
+              <button
+                v-if="explorer.searchQuery"
+                type="button"
+                class="btn-icon h-6 w-6 shrink-0"
+                title="清空"
+                aria-label="清空搜索"
+                @click="explorer.searchQuery = ''"
+              >
+                <X :size="13" />
+              </button>
+            </div>
+          </div>
         </div>
+
+        <button
+          type="button"
+          class="btn-icon"
+          :class="searchOpen && 'text-accent'"
+          :title="searchOpen ? '关闭搜索' : '搜索当前目录'"
+          aria-label="搜索"
+          @click="toggleSearch"
+        >
+          <Search :size="16" />
+        </button>
 
         <button
           type="button"

@@ -40,6 +40,9 @@ export const useExplorerStore = defineStore("explorer", () => {
   const historyIndex = ref(-1);
   let viaHistory = false;
 
+  /** 地址栏搜索：即时过滤当前目录（名称 contains，不区分大小写；空 = 不过滤） */
+  const searchQuery = ref("");
+
   /** 就地重命名中的条目名（FileTable 在名称列渲染输入框） */
   const renamingName = ref<string | null>(null);
   /** 新建草稿类型（列表顶部渲染输入行） */
@@ -240,6 +243,7 @@ export const useExplorerStore = defineStore("explorer", () => {
     historyIndex.value = -1;
     selectedNames.value = new Set();
     anchorName = null;
+    searchQuery.value = "";
     cancelEdit();
   }
 
@@ -258,8 +262,10 @@ export const useExplorerStore = defineStore("explorer", () => {
       permissions: (a, b) => a.permissions.localeCompare(b.permissions),
     };
 
+    const q = searchQuery.value.trim().toLowerCase();
     return entries.value
       .filter((e) => showHidden.value || !e.name.startsWith("."))
+      .filter((e) => !q || e.name.toLowerCase().includes(q))
       .slice()
       .sort((a, b) => dirFirst(a, b) || asc * compare[key](a, b));
   });
@@ -370,6 +376,7 @@ export const useExplorerStore = defineStore("explorer", () => {
     loading,
     error,
     showHidden,
+    searchQuery,
     selectedNames,
     sortKey,
     sortAsc,

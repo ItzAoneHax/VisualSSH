@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, ChevronUp, File, Folder, Link2 } from "@lucide/vue";
+import { ChevronDown, ChevronUp, File, Folder, Link2, SearchX } from "@lucide/vue";
 import { ref, watch } from "vue";
 
 import { useExplorerStore, type SortKey } from "@/stores/explorer";
@@ -286,8 +286,10 @@ function onContainerPointerDown(e: PointerEvent) {
       </div>
 
       <div v-else-if="!explorer.newDraft" class="flex flex-col items-center pt-20 text-dim">
-        <Folder :size="28" class="mb-3 text-faint" />
-        <span class="text-sm">此目录为空</span>
+        <component :is="explorer.searchQuery ? SearchX : Folder" :size="28" class="mb-3 text-faint" />
+        <span class="text-sm">
+          {{ explorer.searchQuery ? `没有匹配「${explorer.searchQuery}」的项目` : "此目录为空" }}
+        </span>
       </div>
     </template>
 
