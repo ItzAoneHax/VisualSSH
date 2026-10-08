@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "exe": "node scripts/pack-exe.mjs",
-    "test": "node --experimental-strip-types scripts/test-phase4.ts"
+    "test": "node --experimental-strip-types scripts/test-phase4.ts",
+    "test:phase5": "node --experimental-strip-types scripts/test-phase5.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
