@@ -250,8 +250,9 @@ function duplicateTab(tab: WorkspaceTab) {
 </script>
 
 <template>
+  <!-- 左距 = 侧栏 w-56(14rem) + 主列 pl-2.5(10px)：标签与文件区卡片左缘对齐（不贴窗口左） -->
   <div
-    class="flex h-9 shrink-0 items-end gap-1 pl-2 pr-1"
+    class="flex h-9 shrink-0 items-end gap-1 pl-[calc(14rem+10px)] pr-1"
     @dragleave="onDragLeave"
   >
     <div
