@@ -185,14 +185,14 @@ onBeforeUnmount(() => {
   clip.clear();
 });
 
-/** 非活动标签不渲染 DOM：切回时静默刷新一次（reloadPreserve 保选中/滚动；
- *  失败保留旧数据，错误横幅在窗格文件区呈现） */
+/** 非活动标签不渲染 DOM：切回时按缓存优先恢复（新鲜缓存瞬时渲染；过期静默刷新；
+ *  无缓存重新加载）——第四阶段块 E，与第三阶段「切标签静默刷新」合并为一套 */
 watch(
   () => workspace.activeTabId,
   (id, old) => {
     if (!id || id === old) return;
     const ex = useExplorer(workspace.activePaneId);
-    if (ex.connectionId) void ex.reloadPreserve();
+    if (ex.connectionId) ex.restoreCached();
   },
 );
 

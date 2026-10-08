@@ -6,6 +6,7 @@ import { connectSsh, disconnectSsh, testSsh, trustHost } from "@/api/ssh";
 import { useTerminalStore } from "@/stores/terminal";
 import { useTransferStore } from "@/stores/transfer";
 import type { SshProfile, SshProfileInput, TestState } from "@/types";
+import { dropDirCache } from "@/utils/dirCache";
 import { useWorkspaceStore } from "@/stores/workspace";
 
 const STORAGE_KEY = "visualssh:profiles:v1";
@@ -328,6 +329,8 @@ export const useConnectionsStore = defineStore("connections", () => {
     if (active.value?.connectionId === oldId) {
       active.value = conn;
     }
+    // 旧连接的目录缓存随旧标识丢弃（重连后按需重建，等效强制失效）
+    dropDirCache(oldId);
     useTransferStore().remapConnection(oldId, newId);
     useWorkspaceStore().remapConnection(oldId, newId);
   }

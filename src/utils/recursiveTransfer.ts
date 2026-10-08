@@ -14,6 +14,7 @@ import {
 import { useConflictStore, type ConflictGroup, type MultiDecisions } from "@/stores/conflicts";
 import { useToastStore } from "@/stores/toast";
 import { useTransferStore } from "@/stores/transfer";
+import { dirCacheOf } from "@/utils/dirCache";
 import type { FileEntry } from "@/types";
 import { joinPath, pathBaseName } from "@/utils/format";
 
@@ -139,7 +140,6 @@ async function runBatchJobs(
     failedItems: failedItems.map(({ name, error }) => ({ name, error })),
   });
   if (!failedItems.length) onDone?.();
-
   // 失败清单可重试：对失败文件直接覆盖传输（首次已做过冲突决策，跳过对话框）；
   // 重试覆盖原批取消句柄（枚举已结束，取消 = 停止重试循环 + 取消活动子项）
   if (failedJobs.length) {
@@ -456,6 +456,8 @@ export async function uploadFolderTo(
     isCancelled,
     childRef,
   );
+  // 块 E：本会话文件操作强制失效目标目录缓存（无论成败，可能有部分文件写入）
+  dirCacheOf(connectionId).invalidate(remoteRoot);
 }
 
 /** —— 拖入/粘贴统一入口（外部路径混合分流）—— */
@@ -513,4 +515,6 @@ export async function uploadMixedPaths(
   for (const item of resolved) {
     void transfers.startUpload(connectionId, item.path, targetRemoteDir, item.finalName);
   }
+  // 块 E：本会话文件操作强制失效目标目录缓存
+  dirCacheOf(connectionId).invalidate(targetRemoteDir);
 }

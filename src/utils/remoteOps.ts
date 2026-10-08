@@ -4,8 +4,10 @@ import type { IncomingItem } from "@/stores/conflicts";
 import { useConflictStore } from "@/stores/conflicts";
 import { useTransferStore } from "@/stores/transfer";
 import type { FileEntry } from "@/types";
+import { dirCacheOf } from "@/utils/dirCache";
 import { joinPath } from "@/utils/format";
 import { deleteSsh, execSsh, listDir, renameSsh, type ExecOutput } from "@/api/ssh";
+
 
 /**
  * 远端移动/复制执行管线（M7 步骤 4）：内部剪贴板粘贴（pasteRemote）与行内拖拽共用。
@@ -110,6 +112,12 @@ export async function remoteMoveCopy(
   } else {
     op.setDone();
   }
+  // 块 E：本会话文件操作强制失效源/目标目录缓存（跨实例共享，其他窗格下次导航重取）
+  if (done > 0) {
+    const cache = dirCacheOf(connectionId);
+    cache.invalidate(sourceDir);
+    cache.invalidate(targetDir);
+  }
   return { done, failed, cancelled: op.isCancelled(), executed };
 }
 
@@ -191,6 +199,10 @@ export async function crossConnectionTransfer(
     } catch (e) {
       failed.push(`${job.name}: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+  if (done > 0) {
+    dirCacheOf(sourceCid).invalidate(sourceDir);
+    dirCacheOf(targetCid).invalidate(targetDir);
   }
   return { done, skippedFolders, failed };
 }

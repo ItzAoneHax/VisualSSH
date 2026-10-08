@@ -16,6 +16,7 @@ import {
   type ColumnState,
 } from "@/stores/folderPrefs";
 import { useSettingsStore } from "@/stores/settings";
+import { DirCache, dirCacheOf } from "@/utils/dirCache";
 
 /** path 排序键专用于搜索结果页（Files SortOption.Path），不写入目录记忆 */
 export type SortKey =
@@ -180,32 +181,64 @@ function buildExplorerStore() {
     () => historyIndex.value < history.value.length - 1,
   );
 
+  /** 目录状态推进（网络加载与缓存命中共用）：cwd/历史/目录记忆/列宽/选中恢复 */
+  function applyLoaded(path: string, list: FileEntry[]) {
+    entries.value = list;
+    cwd.value = path;
+    // 记录每连接上次浏览目录（AppLifecycleHelper.SaveSessionTabs 的每连接简化版）
+    saveLastDir(profileId.value, path);
+    // 刷新（同路径）不入历史栈，避免后退在相同目录间空转
+    if (!viaHistory && path !== history.value[historyIndex.value]) {
+      history.value = [...history.value.slice(0, historyIndex.value + 1), path];
+      historyIndex.value = history.value.length - 1;
+    }
+    applyFolderPrefs(path);
+    // 返回上级：定位并选中原目录行（滚动由 FileTable 处理）
+    const pending = selectAfterLoad.value;
+    if (pending) {
+      if (entries.value.some((e) => e.name === pending)) selectOnly(pending);
+      else selectAfterLoad.value = null;
+    }
+  }
+
+  /** 后台静默刷新（缓存过期路径）：不置 loading，失败保留已渲染内容 */
+  async function silentRefresh(path: string) {
+    if (!connectionId.value) return;
+    try {
+      const list = await listDir(connectionId.value, path);
+      dirCacheOf(connectionId.value).put(path, list);
+      if (cwd.value === path && !loading.value) {
+        entries.value = list;
+      }
+    } catch {
+      // 静默失败：保留已渲染内容
+    }
+  }
+
   async function open(path: string) {
     if (!connectionId.value || loading.value) return;
     // 浏览新目录即离开搜索结果视图
     if (searchSession.value) exitSearch(true);
-    loading.value = true;
     error.value = null;
     selectedNames.value = new Set();
     anchorName = null;
     cancelEdit();
+
+    // 块 E 缓存优先：命中先瞬时渲染，超过新鲜期（30s）再后台静默刷新
+    const cache = dirCacheOf(connectionId.value);
+    const cached = cache.get(path);
+    if (cached) {
+      viaHistory = false;
+      applyLoaded(path, cached.entries);
+      if (DirCache.isStale(cached)) void silentRefresh(path);
+      return;
+    }
+
+    loading.value = true;
     try {
-      entries.value = await listDir(connectionId.value, path);
-      cwd.value = path;
-      // 记录每连接上次浏览目录（AppLifecycleHelper.SaveSessionTabs 的每连接简化版）
-      saveLastDir(profileId.value, path);
-      // 刷新（同路径）不入历史栈，避免后退在相同目录间空转
-      if (!viaHistory && path !== history.value[historyIndex.value]) {
-        history.value = [...history.value.slice(0, historyIndex.value + 1), path];
-        historyIndex.value = history.value.length - 1;
-      }
-      applyFolderPrefs(path);
-      // 返回上级：定位并选中原目录行（滚动由 FileTable 处理）
-      const pending = selectAfterLoad.value;
-      if (pending) {
-        if (entries.value.some((e) => e.name === pending)) selectOnly(pending);
-        else selectAfterLoad.value = null;
-      }
+      const list = await listDir(connectionId.value, path);
+      cache.put(path, list);
+      applyLoaded(path, list);
     } catch (e) {
       // 失败时保留旧目录内容，仅呈现错误横幅
       error.value = e instanceof Error ? e.message : String(e);
@@ -221,7 +254,9 @@ function buildExplorerStore() {
     if (!connectionId.value || loading.value) return;
     loading.value = true;
     try {
-      entries.value = await listDir(connectionId.value, cwd.value);
+      const list = await listDir(connectionId.value, cwd.value);
+      dirCacheOf(connectionId.value).put(cwd.value, list);
+      entries.value = list;
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -264,7 +299,30 @@ function buildExplorerStore() {
   }
 
   function refresh() {
-    void open(cwd.value);
+    // 刷新按钮 = 强制失效（不走缓存，直接网络重取）
+    if (!connectionId.value || loading.value) return;
+    dirCacheOf(connectionId.value).invalidate(cwd.value);
+    void reloadPreserve();
+  }
+
+  /** 强制失效目录及子目录缓存（本会话文件操作/重连联动；跨实例共享缓存） */
+  function invalidatePath(path: string) {
+    if (!connectionId.value) return;
+    dirCacheOf(connectionId.value).invalidate(path);
+  }
+
+  /** 切换标签恢复（块 E：与切标签静默刷新合并为一套缓存优先逻辑）：
+   *  缓存新鲜直接用；过期先渲染再静默刷新；无缓存走网络重取 */
+  function restoreCached() {
+    if (!connectionId.value) return;
+    const cache = dirCacheOf(connectionId.value);
+    const cached = cache.get(cwd.value);
+    if (!cached) {
+      void reloadPreserve();
+      return;
+    }
+    entries.value = cached.entries;
+    if (DirCache.isStale(cached)) void silentRefresh(cwd.value);
   }
 
   function up() {
@@ -787,6 +845,8 @@ function buildExplorerStore() {
     breadcrumbSegments,
     open,
     reloadPreserve,
+    restoreCached,
+    invalidatePath,
     back,
     forward,
     navigateToHistory,
