@@ -7,6 +7,7 @@ mod state;
 mod stats;
 mod terminal;
 mod transfer;
+mod walk;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -51,6 +52,10 @@ pub fn run() {
             commands::transfer::local_file_meta,
             commands::stats::ssh_dir_stats,
             commands::stats::ssh_dir_stats_cancel,
+            commands::walk::ssh_walk_remote,
+            commands::walk::ssh_walk_cancel,
+            commands::walk::walk_local,
+            commands::walk::local_mkdir_p,
             commands::terminal::ssh_open_terminal,
             commands::terminal::ssh_terminal_write,
             commands::terminal::ssh_terminal_resize,
