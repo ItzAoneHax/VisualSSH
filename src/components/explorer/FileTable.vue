@@ -14,6 +14,12 @@ import { useSettingsStore } from "@/stores/settings";
 import type { FileEntry } from "@/types";
 import { formatMtime, formatSize, joinPath, kindLabel } from "@/utils/format";
 import {
+  isThumbnailCandidate,
+  thumbnailCache,
+  THUMBNAIL_MAX,
+} from "@/utils/preview";
+import { registerThumb, thumbVersion, type ThumbRequest } from "@/utils/thumbs";
+import {
   hasFilesPayload,
   readFilesPayload,
   resolveDragNames,
@@ -274,6 +280,67 @@ function iconClass(entry: FileEntry): string {
       return "text-dim";
   }
 }
+
+/** —— 表格缩略图（第五阶段块 B）：图片文件（≤2MB）在图标位渲染小缩略图，
+ *  IntersectionObserver 视口内才拉取（utils/thumbs 调度：并发 4/空闲调度/滚动稳定），
+ *  失败静默回退现有图标；搜索结果视图不参与（键为 relPath） —— */
+
+/** 缩略图展示尺寸随行高密度档：紧凑 28 行用 18px，其余 20px（2px 圆角既有定稿） */
+const thumbSize = computed(() =>
+  settings.settings.detailsRowHeight <= 28 ? 18 : 20,
+);
+
+function thumbKeyOf(entry: FileEntry): string {
+  return `${explorer.connectionId}:${joinPath(explorer.cwd, entry.name)}:${entry.mtime ?? 0}`;
+}
+
+function isThumbRow(entry: FileEntry): boolean {
+  return (
+    !inSearch.value &&
+    !!explorer.connectionId &&
+    settings.settings.showThumbnails &&
+    isThumbnailCandidate(entry)
+  );
+}
+
+/** 渲染期取缓存（void 版本号建立响应式依赖：任一缩略图完成即重算） */
+function thumbSrc(entry: FileEntry): string | null {
+  if (!isThumbRow(entry)) return null;
+  void thumbVersion.value;
+  return thumbnailCache.get(thumbKeyOf(entry));
+}
+
+function makeThumbRequest(entry: FileEntry): ThumbRequest {
+  return {
+    key: thumbKeyOf(entry),
+    connectionId: explorer.connectionId,
+    path: joinPath(explorer.cwd, entry.name),
+    maxBytes: THUMBNAIL_MAX,
+  };
+}
+
+/** 行 ref 工厂按 rowKey 缓存（稳定函数身份：重渲染不重挂 IntersectionObserver）；
+ *  注册时以 explorer 里的当前条目构造请求（重载后 mtime 变化即换缓存键） */
+const thumbRefs = new Map<string, (el: unknown) => (() => void) | undefined>();
+
+function thumbRefFor(entry: FileEntry): (el: unknown) => (() => void) | undefined {
+  const key = rowKey(entry);
+  let fn = thumbRefs.get(key);
+  if (!fn) {
+    fn = (el: unknown) => {
+      const target = explorer.entryByName(key) ?? entry;
+      return registerThumb(el, makeThumbRequest(target));
+    };
+    thumbRefs.set(key, fn);
+  }
+  return fn;
+}
+
+// 目录切换后丢弃旧 ref 工厂（行全部重建，闭包里的 cwd/请求已过期）
+watch(
+  () => explorer.cwd,
+  () => thumbRefs.clear(),
+);
 
 /** Windows 资源管理器语义：单击单选 / Ctrl+单击反选 / Shift+单击范围；
  *  开启「单击打开」后，无修饰键单击 = 打开 */
@@ -639,9 +706,30 @@ const dragOverDir = ref<string | null>(null);
             class="pointer-events-none absolute top-1/2 left-0 h-4 w-[3px] -translate-y-1/2 rounded-[1.5px] bg-accent"
             aria-hidden="true"
           />
-          <!-- 名称列：图标 16 + 文字距 6（DetailsLayoutPage IconColumn） -->
+          <!-- 名称列：图标 16 + 文字距 6（DetailsLayoutPage IconColumn）；
+              图片文件渲染缩略图（20px 方块 2px 圆角，紧凑行 18px），未加载/失败回退图标 -->
           <span class="flex min-w-0 items-center pl-3">
+            <span
+              v-if="isThumbRow(entry)"
+              :ref="thumbRefFor(entry)"
+              class="flex shrink-0 items-center justify-center"
+              :style="{ width: `${thumbSize}px`, height: `${thumbSize}px` }"
+            >
+              <img
+                v-if="thumbSrc(entry)"
+                :src="thumbSrc(entry)!"
+                class="h-full w-full rounded-[2px] object-cover"
+                alt=""
+              />
+              <component
+                v-else
+                :is="iconFor(entry)"
+                :size="16"
+                :class="iconClass(entry)"
+              />
+            </span>
             <component
+              v-else
               :is="iconFor(entry)"
               :size="16"
               class="shrink-0"

@@ -7,6 +7,7 @@ import {
   Eye,
   FileText,
   History as HistoryIcon,
+  Image,
   MousePointerClick,
   Pencil,
   TriangleAlert,
@@ -244,6 +245,25 @@ function setShowHidden(value: boolean) {
         class="toggle-switch"
         :class="s.transferNotify && 'on'"
         @click="settings.update({ transferNotify: !s.transferNotify })"
+      >
+        <span class="toggle-knob" />
+      </button>
+    </div>
+
+    <!-- 表格图片缩略图（第五阶段块 B） -->
+    <div class="settings-card">
+      <Image :size="20" class="shrink-0 text-dim" />
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium">图片缩略图</p>
+        <p class="mt-0.5 text-xs text-dim">文件列表中为 2MB 内的图片显示缩略图（仅加载视口内的行）。</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        :aria-checked="s.showThumbnails"
+        class="toggle-switch"
+        :class="s.showThumbnails && 'on'"
+        @click="settings.update({ showThumbnails: !s.showThumbnails })"
       >
         <span class="toggle-knob" />
       </button>
