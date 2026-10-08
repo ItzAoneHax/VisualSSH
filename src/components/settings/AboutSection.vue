@@ -1,7 +1,26 @@
 <script setup lang="ts">
-import { Code, Info, ShieldCheck } from "@lucide/vue";
+import { Check, Code, Info, ShieldCheck } from "@lucide/vue";
+import { getVersion } from "@tauri-apps/api/app";
+import { onMounted, ref } from "vue";
 
-/** 关于分区 */
+/** 关于分区；版本号单一来源 getVersion()（tauri.conf.json），点击复制 */
+const version = ref("");
+const copied = ref(false);
+
+onMounted(async () => {
+  try {
+    version.value = await getVersion();
+  } catch {
+    version.value = "";
+  }
+});
+
+async function copyVersion() {
+  if (!version.value) return;
+  await navigator.clipboard.writeText(version.value);
+  copied.value = true;
+  setTimeout(() => (copied.value = false), 1500);
+}
 </script>
 
 <template>
@@ -15,7 +34,15 @@ import { Code, Info, ShieldCheck } from "@lucide/vue";
         <p class="text-sm font-medium">VisualSSH</p>
         <p class="mt-0.5 text-xs text-dim">远程文件，本地体验。</p>
       </div>
-      <span class="shrink-0 font-mono text-xs text-dim">0.1.0</span>
+      <button
+        v-if="version"
+        class="flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-mono text-xs text-dim transition-colors hover:bg-fill-subtle hover:text-ink"
+        :title="`版本 ${version}（点击复制）`"
+        @click="copyVersion"
+      >
+        <Check v-if="copied" :size="12" class="text-accent" />
+        <span>{{ version }}</span>
+      </button>
     </div>
     <div class="settings-card">
       <ShieldCheck :size="20" class="shrink-0 text-dim" />
