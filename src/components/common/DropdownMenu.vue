@@ -39,13 +39,15 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
     <!-- 点击外部关闭 -->
     <div class="fixed inset-0 z-40" @click="emit('close')" @contextmenu.prevent="emit('close')" />
 
-    <!-- MenuFlyout：8 圆角卡片 + 1px 描边 -->
+    <!-- MenuFlyout：8 圆角卡片 + 1px 描边 + 亚克力表面（WinUI MenuFlyout=DesktopAcrylic 的 CSS 近似） -->
     <Transition name="popup">
       <div
         role="menu"
         class="absolute right-0 z-50 mt-1 min-w-44 rounded-lg p-1 shadow-xl"
         :style="{
-          background: 'var(--surface-solid)',
+          background: 'color-mix(in srgb, var(--surface-solid) 84%, transparent)',
+          backdropFilter: 'blur(20px) saturate(1.15)',
+          WebkitBackdropFilter: 'blur(20px) saturate(1.15)',
           border: '1px solid var(--stroke-flyout)',
         }"
       >
