@@ -671,16 +671,6 @@ watch(
             <span class="ml-3 truncate">{{ link.name }}</span>
           </button>
         </nav>
-
-        <button
-          type="button"
-          class="nav-item mt-auto"
-          title="设置"
-          @click="settings.openSettings()"
-        >
-          <Settings :size="16" class="ml-1 shrink-0" />
-          <span class="ml-3 truncate">设置</span>
-        </button>
       </aside>
 
       <!-- 主列：窗格（地址行卡 + 文件区）+ 状态栏（min-h-0 截断 min-content 传播，保证文件区内部滚动） -->
@@ -869,17 +859,29 @@ watch(
       </template>
     </div>
 
-    <!-- 通栏状态栏：项目统计 + 连接状态（全宽一条，底部唯一收边；可在设置中隐藏） -->
+    <!-- 通栏状态栏：设置 + 项目统计（左）+ 连接状态（右）——设置在状态栏行首（Files MainPage
+        SidebarView.Footer 的 SettingsButton 与 StatusBars 同行观感，MainPage.xaml:306-330） -->
     <footer
       v-if="settings.settings.showStatusBar"
       class="flex h-8 shrink-0 items-center justify-between border-t px-3 text-xs text-dim"
       :style="{ borderColor: 'var(--line)' }"
     >
-      <span>
-        {{ activeExplorer?.visibleEntries.length ?? 0 }} 个项目
-        <span v-if="activeExplorer?.selectedNames.size">
-          · 已选择 {{ activeExplorer.selectedNames.size }} 项
-          <template v-if="selectedSizeLabel">· 共 {{ selectedSizeLabel }}</template>
+      <span class="flex min-w-0 items-center gap-2">
+        <button
+          type="button"
+          class="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-[2px] px-1.5 text-xs text-ink transition-colors hover:bg-fill-subtle"
+          title="设置"
+          @click="settings.openSettings()"
+        >
+          <Settings :size="14" class="text-dim" />
+          <span class="truncate">设置</span>
+        </button>
+        <span class="min-w-0 truncate">
+          {{ activeExplorer?.visibleEntries.length ?? 0 }} 个项目
+          <span v-if="activeExplorer?.selectedNames.size">
+            · 已选择 {{ activeExplorer.selectedNames.size }} 项
+            <template v-if="selectedSizeLabel">· 共 {{ selectedSizeLabel }}</template>
+          </span>
         </span>
       </span>
       <span class="flex min-w-0 items-baseline gap-3">
