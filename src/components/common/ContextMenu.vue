@@ -43,17 +43,16 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
     <!-- 点击外部关闭 -->
     <div class="fixed inset-0 z-40" @click="emit('close')" @contextmenu.prevent="emit('close')" />
 
-    <!-- MenuFlyout：不透明实体表面 + 8 圆角 + 描边 + 阴影 → 亚克力表面（WinUI DesktopAcrylic CSS 近似） -->
+    <!-- MenuFlyout：亚克力表面（menu-surface 按窗口材质分级不透明度）+ 8 圆角 + 描边 + 阴影 -->
     <Transition name="popup">
       <div
         role="menu"
-        class="fixed z-50 overflow-y-auto rounded-lg p-1 shadow-xl"
+        class="menu-surface fixed z-50 overflow-y-auto rounded-lg p-1 shadow-xl"
         :style="{
           left: `${position.left}px`,
           top: `${position.top}px`,
           maxHeight: position.maxHeight,
           minWidth: `${MENU_WIDTH}px`,
-          background: 'color-mix(in srgb, var(--surface-solid) 84%, transparent)',
           backdropFilter: 'blur(20px) saturate(1.15)',
           WebkitBackdropFilter: 'blur(20px) saturate(1.15)',
           border: '1px solid var(--stroke-flyout)',
