@@ -1,7 +1,7 @@
 {
   "name": "visualssh",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "VisualSSH — 让远程文件操作，像本地一样优雅",
   "type": "module",
   "scripts": {
