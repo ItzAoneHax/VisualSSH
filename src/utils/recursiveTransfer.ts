@@ -61,12 +61,14 @@ async function runBatchJobs(
   isCancelled: { value: boolean },
   childRef: ChildRef,
   onDone?: () => void,
+  skippedLinks = 0,
 ): Promise<void> {
   const transfers = useTransferStore();
   transfers.updateBatch(batchId, {
     phase: "transferring",
     filesTotal: jobs.length,
     bytesTotal: jobs.reduce((s, j) => s + j.size, 0),
+    skippedLinks,
   });
 
   await prepareDirs();
@@ -296,6 +298,7 @@ export async function downloadFolderTo(connectionId: string, remoteDir: string):
         label: "打开目标目录",
         run: () => void revealItemInDir(localTarget).catch(() => {}),
       }),
+    output.skippedLinks,
   );
 }
 
@@ -423,6 +426,8 @@ export async function uploadFolderTo(
     },
     isCancelled,
     childRef,
+    undefined,
+    output.skippedLinks,
   );
   // 块 E：本会话文件操作强制失效目标目录缓存（无论成败，可能有部分文件写入）
   dirCacheOf(connectionId).invalidate(remoteRoot);
