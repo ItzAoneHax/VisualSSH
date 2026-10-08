@@ -169,7 +169,7 @@ body {
 
 /* 窗口材质（设置-外观，Files BackdropMaterialType 语义）：Mica/Acrylic 时基底降透明度，
    让 Tauri setEffects 挂的系统底衬透出；档位经 html[data-material] 驱动，none 无此属性=实色现状。
-   Acrylic 噪点重，基底不透明度需显著高于 Mica 才能保证内容可读（62% vs 42%） */
+   Tauri 的 Acrylic 走 accent 策略，底衬偏亮，基底不透明度过低会整界面发浅（85% 仅留材质隐约可见） */
 :root[data-material="mica"] body {
   background:
     linear-gradient(var(--app-bg-tint, transparent), var(--app-bg-tint, transparent)),
@@ -178,7 +178,7 @@ body {
 :root[data-material="acrylic"] body {
   background:
     linear-gradient(var(--app-bg-tint, transparent), var(--app-bg-tint, transparent)),
-    color-mix(in srgb, var(--bg) 62%, transparent);
+    color-mix(in srgb, var(--bg) 85%, transparent);
 }
 
 /* 浮层菜单表面（亚克力观感）：backdrop-filter 只能模糊页面内内容，系统材质透出的部分

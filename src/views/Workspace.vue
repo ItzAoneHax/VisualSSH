@@ -16,7 +16,7 @@ import {
   SquareTerminal,
   TriangleAlert,
 } from "@lucide/vue";
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import ContextMenu from "@/components/common/ContextMenu.vue";
 import type { MenuItem } from "@/components/common/DropdownMenu.vue";
@@ -199,7 +199,51 @@ function toggleInfoPane() {
 
 function onWinResize() {
   winSize.value = { w: window.innerWidth, h: window.innerHeight };
+  measureFusion();
 }
+
+/** —— 标签与工具条卡熔接顶线 ——
+ *  卡片自身顶边透明（ExplorerPane 单栏卡/双栏全局行），线由主列统一绘制，
+ *  并在活动标签正下方留出真实缺口（Files：选中段底边线隐藏；半透明标签盖不住
+ *  不透明线，故线必须物理断开）——位置随标签激活/增删/重排与窗口尺寸变化重测 */
+const mainColRef = ref<HTMLElement | null>(null);
+const fusionStyle = ref<{ background: string }>({ background: "var(--line)" });
+let fusionResizeObserver: ResizeObserver | null = null;
+
+function measureFusion() {
+  const col = mainColRef.value;
+  if (!col) return;
+  const el = document.querySelector("[data-active-tab]");
+  if (!el) {
+    fusionStyle.value = { background: "var(--line)" };
+    return;
+  }
+  const r = el.getBoundingClientRect();
+  const a = Math.max(8, r.left - col.getBoundingClientRect().left);
+  const b = Math.min(col.clientWidth - 8, a + r.width);
+  // 两端各留 8px（卡片圆角半径）：直线出头会越过圆角（用户真机报告），圆角段无线
+  fusionStyle.value = {
+    background: `linear-gradient(90deg, transparent 0 8px, var(--line) 8px ${a}px, transparent ${a}px ${b}px, var(--line) ${b}px calc(100% - 8px), transparent calc(100% - 8px) 100%)`,
+  };
+}
+
+watch(
+  () => [
+    workspace.activeTabId,
+    workspace.tabs.length,
+    workspace.tabs.map((t) => t.id).join(","),
+    isDualPane.value,
+  ],
+  () => void nextTick(measureFusion),
+);
+
+onMounted(() => {
+  fusionResizeObserver = new ResizeObserver(() => measureFusion());
+  if (mainColRef.value) fusionResizeObserver.observe(mainColRef.value);
+  measureFusion();
+});
+
+onBeforeUnmount(() => fusionResizeObserver?.disconnect());
 
 onMounted(() => {
   infoResizeObserver = new ResizeObserver((entries) => {
@@ -673,8 +717,9 @@ watch(
         </nav>
       </aside>
 
-      <!-- 主列：窗格（地址行卡 + 文件区）+ 状态栏（min-h-0 截断 min-content 传播，保证文件区内部滚动） -->
-      <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-1 p-2 pl-2.5">
+      <!-- 主列：窗格（地址行卡 + 文件区）+ 状态栏（min-h-0 截断 min-content 传播，保证文件区内部滚动）。
+          无顶距：首张工具条卡直接承接上方选中标签的熔接；熔接顶线见 fusionStyle -->
+      <div ref="mainColRef" class="relative flex min-h-0 min-w-0 flex-1 flex-col gap-1 pb-2 pl-2.5 pr-2">
         <!-- 单窗格：全局工具（搜索框/终端/传输/分屏）嵌在窗格地址行卡内（与单栏现状一致） -->
         <ExplorerPane
           v-if="activeTab && workspace.activePaneId && !isDualPane"
@@ -731,10 +776,14 @@ watch(
 
         <!-- 双窗格：全局工具行独立一行，两窗格各自渲染导航段 + 文件区 -->
         <template v-else-if="activeTab && workspace.activePaneId">
-          <!-- 全局工具行（一份：搜索框作用于活动窗格，无双份终端/传输） -->
+          <!-- 全局工具行（一份：搜索框作用于活动窗格，无双份终端/传输）；顶边透明，线由主列熔接顶线绘制 -->
           <div
             class="flex h-12 shrink-0 items-center gap-1 rounded-lg px-1"
-            :style="{ background: 'var(--toolbar)', border: '1px solid var(--line)' }"
+            :style="{
+              background: 'var(--toolbar)',
+              border: '1px solid var(--line)',
+              borderTopColor: 'transparent',
+            }"
           >
             <span class="min-w-0 flex-1 truncate px-2 text-xs text-faint">
               {{ arrangement === "horizontal" ? "上下分屏" : "左右分屏" }} — 点击窗格切换焦点（Ctrl+Shift+→/←）
@@ -838,6 +887,13 @@ watch(
           </div>
           <InfoPane class="shrink-0" :style="{ height: `${infoHeight}px` }" />
         </template>
+
+        <!-- 熔接顶线：工具条卡的顶边可视线，活动标签下方留缺口（位置见 measureFusion） -->
+        <div
+          class="pointer-events-none absolute top-0 right-0 left-0 z-10 h-px"
+          :style="fusionStyle"
+          aria-hidden="true"
+        />
       </div>
 
       <!-- 信息窗格（右侧模式）：主行内、主列之后（与侧栏对称） -->
@@ -859,29 +915,31 @@ watch(
       </template>
     </div>
 
-    <!-- 通栏状态栏：设置 + 项目统计（左）+ 连接状态（右）——设置在状态栏行首（Files MainPage
+    <!-- 通栏状态栏：设置（最左，独占侧栏宽度段）+ 项目统计（与文件列表左缘对齐，
+        Files StatusBars 同款对位）+ 连接状态（右）——设置在状态栏行首（Files MainPage
         SidebarView.Footer 的 SettingsButton 与 StatusBars 同行观感，MainPage.xaml:306-330） -->
     <footer
       v-if="settings.settings.showStatusBar"
-      class="flex h-8 shrink-0 items-center justify-between border-t px-3 text-xs text-dim"
+      class="relative flex h-8 shrink-0 items-center justify-between border-t px-3 text-xs text-dim"
       :style="{ borderColor: 'var(--line)' }"
     >
-      <span class="flex min-w-0 items-center gap-2">
-        <button
-          type="button"
-          class="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-[2px] px-1.5 text-xs text-ink transition-colors hover:bg-fill-subtle"
-          title="设置"
-          @click="settings.openSettings()"
-        >
-          <Settings :size="14" class="text-dim" />
-          <span class="truncate">设置</span>
-        </button>
-        <span class="min-w-0 truncate">
-          {{ activeExplorer?.visibleEntries.length ?? 0 }} 个项目
-          <span v-if="activeExplorer?.selectedNames.size">
-            · 已选择 {{ activeExplorer.selectedNames.size }} 项
-            <template v-if="selectedSizeLabel">· 共 {{ selectedSizeLabel }}</template>
-          </span>
+      <button
+        type="button"
+        class="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-[2px] px-1.5 text-xs text-ink transition-colors hover:bg-fill-subtle"
+        title="设置"
+        @click="settings.openSettings()"
+      >
+        <Settings :size="14" class="text-dim" />
+        <span class="truncate">设置</span>
+      </button>
+      <span
+        class="pointer-events-none absolute top-1/2 min-w-0 max-w-[40vw] -translate-y-1/2 truncate"
+        :style="{ left: 'calc(14rem + 10px)' }"
+      >
+        {{ activeExplorer?.visibleEntries.length ?? 0 }} 个项目
+        <span v-if="activeExplorer?.selectedNames.size">
+          · 已选择 {{ activeExplorer.selectedNames.size }} 项
+          <template v-if="selectedSizeLabel">· 共 {{ selectedSizeLabel }}</template>
         </span>
       </span>
       <span class="flex min-w-0 items-baseline gap-3">
