@@ -747,7 +747,7 @@ function onKeydown(e: KeyboardEvent) {
 
 <template>
   <div
-    class="flex min-w-0 flex-1 flex-col gap-1"
+    class="flex min-h-0 min-w-0 flex-1 flex-col gap-1"
     @pointerdown="activatePane"
     @contextmenu="activatePane"
   >

@@ -569,8 +569,8 @@ watch(
         </button>
       </aside>
 
-      <!-- 主列：窗格（地址行卡 + 文件区）+ 状态栏 -->
-      <div class="flex min-w-0 flex-1 flex-col gap-1 p-2 pl-2.5">
+      <!-- 主列：窗格（地址行卡 + 文件区）+ 状态栏（min-h-0 截断 min-content 传播，保证文件区内部滚动） -->
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-1 p-2 pl-2.5">
         <!-- 单窗格：全局工具（搜索框/终端/传输/分屏）嵌在窗格地址行卡内（与单栏现状一致） -->
         <ExplorerPane
           v-if="activeTab && workspace.activePaneId && !isDualPane"
