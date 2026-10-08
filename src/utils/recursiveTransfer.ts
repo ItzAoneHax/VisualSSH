@@ -1,4 +1,5 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { localFileMeta, type LocalFileMeta } from "@/api/transfer";
 import { listDir, mkdirSsh, statSsh } from "@/api/ssh";
@@ -11,6 +12,7 @@ import {
   type WalkOutput,
 } from "@/api/walk";
 import { useConflictStore, type ConflictGroup, type MultiDecisions } from "@/stores/conflicts";
+import { useToastStore } from "@/stores/toast";
 import { useTransferStore } from "@/stores/transfer";
 import type { FileEntry } from "@/types";
 import { joinPath, pathBaseName } from "@/utils/format";
@@ -87,6 +89,7 @@ async function runBatchJobs(
   prepareDirs: () => Promise<void>,
   isCancelled: { value: boolean },
   childRef: ChildRef,
+  onDone?: () => void,
 ): Promise<void> {
   const transfers = useTransferStore();
   transfers.updateBatch(batchId, {
@@ -135,6 +138,7 @@ async function runBatchJobs(
     status: "done",
     failedItems: failedItems.map(({ name, error }) => ({ name, error })),
   });
+  if (!failedItems.length) onDone?.();
 
   // 失败清单可重试：对失败文件直接覆盖传输（首次已做过冲突决策，跳过对话框）；
   // 重试覆盖原批取消句柄（枚举已结束，取消 = 停止重试循环 + 取消活动子项）
@@ -193,6 +197,7 @@ function bindCancelHandle(
 export async function downloadFolderTo(connectionId: string, remoteDir: string): Promise<void> {
   const transfers = useTransferStore();
   const conflicts = useConflictStore();
+  const toast = useToastStore();
   const folderName = pathBaseName(remoteDir) || remoteDir;
 
   // 先选目标本地目录（枚举可能较久，选择是最便宜的决策）
@@ -316,6 +321,12 @@ export async function downloadFolderTo(connectionId: string, remoteDir: string):
     },
     isCancelled,
     childRef,
+    // C2：文件夹下载完成 toast +「打开目标目录」
+    () =>
+      toast.show(`已下载文件夹「${folderName}」`, {
+        label: "打开目标目录",
+        run: () => void revealItemInDir(localTarget).catch(() => {}),
+      }),
   );
 }
 

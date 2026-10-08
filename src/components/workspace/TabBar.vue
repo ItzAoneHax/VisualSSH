@@ -5,6 +5,7 @@ import { ref } from "vue";
 import ContextMenu from "@/components/common/ContextMenu.vue";
 import type { MenuItem } from "@/components/common/DropdownMenu.vue";
 import { useConnectionsStore } from "@/stores/connections";
+import { useExitGuardStore } from "@/stores/exitGuard";
 import { useExplorer } from "@/stores/explorer";
 import { useWorkspaceStore, type WorkspaceTab } from "@/stores/workspace";
 import {
@@ -34,6 +35,7 @@ const emit = defineEmits<{
 
 const workspace = useWorkspaceStore();
 const connections = useConnectionsStore();
+const exitGuard = useExitGuardStore();
 
 function tooltipOf(tab: WorkspaceTab): string {
   const conn = connections.byId[tab.connectionId];
@@ -41,8 +43,10 @@ function tooltipOf(tab: WorkspaceTab): string {
   return `${conn ? `${conn.profile.username}@${conn.profile.host}` : tab.alias} — ${cwd}`;
 }
 
-/** 关闭（中键/关闭按钮）：带当前目录入重开栈 */
-function onCloseRequest(tab: WorkspaceTab) {
+/** 关闭（中键/关闭按钮）：带当前目录入重开栈；
+ *  关闭最后一个标签（离开语义）前经退出保护确认（C3） */
+async function onCloseRequest(tab: WorkspaceTab) {
+  if (workspace.tabs.length === 1 && !(await exitGuard.request())) return;
   workspace.closeTab(tab.id, useExplorer(tab.activePaneId).cwd);
 }
 

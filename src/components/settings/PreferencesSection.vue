@@ -2,6 +2,7 @@
 import {
   ArrowDownUp,
   ArrowUpFromLine,
+  BellRing,
   Binary,
   Eye,
   FileText,
@@ -224,6 +225,25 @@ function setShowHidden(value: boolean) {
         class="toggle-switch"
         :class="!s.editorReadOnlyDefault && 'on'"
         @click="settings.update({ editorReadOnlyDefault: !s.editorReadOnlyDefault })"
+      >
+        <span class="toggle-knob" />
+      </button>
+    </div>
+
+    <!-- 传输完成系统通知（第四阶段 C1） -->
+    <div class="settings-card">
+      <BellRing :size="20" class="shrink-0 text-dim" />
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium">传输完成通知</p>
+        <p class="mt-0.5 text-xs text-dim">传输队列全部结束时发送系统通知（含成功/失败计数）。</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        :aria-checked="s.transferNotify"
+        class="toggle-switch"
+        :class="s.transferNotify && 'on'"
+        @click="settings.update({ transferNotify: !s.transferNotify })"
       >
         <span class="toggle-knob" />
       </button>

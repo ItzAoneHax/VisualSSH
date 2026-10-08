@@ -54,6 +54,8 @@ keyring = { version = "4", default-features = false, features = [
     "v1",
     "windows-native-keyring-store",
 ] }
+tauri-plugin-notification = "2.4.0"
+tauri-plugin-opener = "2.5.5"
 
 [profile.release]
 codegen-units = 1

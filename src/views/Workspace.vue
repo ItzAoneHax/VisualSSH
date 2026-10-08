@@ -28,6 +28,7 @@ import TransferCenter from "@/components/workspace/TransferCenter.vue";
 import { useConnectionsStore } from "@/stores/connections";
 import { useClipboardStore } from "@/stores/clipboard";
 import { useExplorer } from "@/stores/explorer";
+import { useExitGuardStore } from "@/stores/exitGuard";
 import { usePinnedStore } from "@/stores/pinned";
 import { useSettingsStore } from "@/stores/settings";
 import { useTerminalStore } from "@/stores/terminal";
@@ -62,6 +63,7 @@ const clip = useClipboardStore();
 const terminalStore = useTerminalStore();
 const settings = useSettingsStore();
 const pinnedStore = usePinnedStore();
+const exitGuard = useExitGuardStore();
 
 /** 活动标签（computed 保响应性：切标签时状态栏/侧栏/连接随之切换） */
 const activeTab = computed(() => workspace.activeTab);
@@ -267,7 +269,7 @@ function onReopenTab() {
 /** Ctrl+T 新建（弹列表）/ Ctrl+W 关闭当前 / Ctrl+Shift+T 重开已关闭；
  *  Alt+Shift+V/H 分屏（Files SplitPaneVertically/HorizontallyAction，按分隔条方向命名：
  *  V=左右并排 / H=上下堆叠）；Ctrl+Shift+→/← 焦点切换（FocusOtherPaneAction，← 为对称补充） */
-function onKeydown(e: KeyboardEvent) {
+async function onKeydown(e: KeyboardEvent) {
   if (e.altKey && e.shiftKey && !e.ctrlKey) {
     const key = e.key.toLowerCase();
     if (key === "v") {
@@ -297,6 +299,8 @@ function onKeydown(e: KeyboardEvent) {
     e.preventDefault();
     const tab = activeTab.value;
     if (!tab) return;
+    // 关闭最后一个标签（离开语义）前经退出保护确认（C3）
+    if (workspace.tabs.length === 1 && !(await exitGuard.request())) return;
     workspace.closeTab(tab.id, activeExplorer.value?.cwd);
   } else if (key === "t" && e.shiftKey) {
     e.preventDefault();

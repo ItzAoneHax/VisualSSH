@@ -46,6 +46,7 @@ import { usePinnedStore } from "@/stores/pinned";
 import { useSettingsStore } from "@/stores/settings";
 import { useTerminalStore } from "@/stores/terminal";
 import { useTransferStore } from "@/stores/transfer";
+import { useToastStore } from "@/stores/toast";
 import { useWorkspaceStore } from "@/stores/workspace";
 import type { FileEntry } from "@/types";
 import { copyText, joinPath, pathBaseName } from "@/utils/format";
@@ -62,6 +63,7 @@ import {
 import { crossConnectionTransfer, remoteMoveCopy } from "@/utils/remoteOps";
 import { copyVirtualFiles, readClipboardFiles } from "@/api/clipboard";
 import { readClipboardImage, saveClipboardImage } from "@/api/clipboard";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 /**
  * 单个窗格（M7 步骤 2/3）：导航段（后退/前进/上一级/刷新/面包屑）+ 文件区 +
@@ -78,6 +80,7 @@ const workspace = useWorkspaceStore();
 const explorer = useExplorer(props.paneId);
 const editor = useEditorStore();
 const transfers = useTransferStore();
+const toastStore = useToastStore();
 const conflicts = useConflictStore();
 const clip = useClipboardStore();
 const settings = useSettingsStore();
@@ -411,7 +414,14 @@ async function downloadEntries(files: FileEntry[]) {
     if (!target) return;
     const cid = connectionId.value;
     if (cid) {
-      await transfers.startDownload(cid, joinPath(explorer.cwd, files[0].name), target);
+      const id = await transfers.startDownloadTo(cid, joinPath(explorer.cwd, files[0].name), target);
+      // C2：单文件下载完成 toast +「打开所在文件夹」（tauri-plugin-opener reveal）
+      if (await transfers.waitAllDone([id])) {
+        toastStore.show(`已下载 ${files[0].name}`, {
+          label: "打开所在文件夹",
+          run: () => void revealItemInDir(target).catch(() => {}),
+        });
+      }
     }
     return;
   }

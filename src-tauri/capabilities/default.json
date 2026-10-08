@@ -1,15 +1,19 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "VisualSSH 主窗口的默认能力：仅允许核心事件，不开放额外系统权限。",
+  "description": "VisualSSH 主窗口的默认能力：核心窗口/对话框 + 传输完成通知 + 打开所在文件夹。",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
+    "core:window:allow-destroy",
     "core:window:allow-start-dragging",
     "core:window:allow-is-maximized",
-    "dialog:allow-save"
+    "dialog:allow-save",
+    "dialog:allow-open",
+    "notification:default",
+    "opener:allow-reveal-item-in-dir"
   ]
 }

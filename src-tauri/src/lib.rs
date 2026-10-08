@@ -19,6 +19,8 @@ pub fn run() {
         .manage(std::sync::Arc::new(stats::StatsManager::default()))
         .manage(std::sync::Arc::new(search::SearchManager::default()))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::ssh_connect,
             commands::ssh_test,

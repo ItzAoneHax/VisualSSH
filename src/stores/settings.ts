@@ -67,6 +67,8 @@ export interface AppSettings {
   restoreLastDir: boolean;
   /** 编辑器打开时默认只读（true）还是直接进入编辑态（false，默认） */
   editorReadOnlyDefault: boolean;
+  /** 传输完成系统通知（第四阶段 C1；默认开） */
+  transferNotify: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -94,6 +96,7 @@ const DEFAULTS: AppSettings = {
   detailsRowHeight: 36,
   restoreLastDir: true,
   editorReadOnlyDefault: false,
+  transferNotify: true,
 };
 
 function load(): AppSettings {
