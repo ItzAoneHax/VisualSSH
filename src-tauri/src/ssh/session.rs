@@ -270,11 +270,7 @@ impl SshSession {
         const EXEC_TIMEOUT: Duration = Duration::from_secs(30);
 
         let channel = self.open_session_channel().await?;
-        let mut command = shell_quote(program);
-        for arg in args {
-            command.push(' ');
-            command.push_str(&shell_quote(arg));
-        }
+        let command = build_command(program, args);
         channel
             .exec(true, command.into_bytes())
             .await
@@ -431,6 +427,42 @@ impl SshSession {
             .map_err(|e| Error::Sftp(format!("修改 {path} 权限失败: {e}")))
     }
 
+    /// 读整个文件字节（图片预览/缩略图 base64 直读用）。上限由调用方按用途传入
+    /// （预览窗格 10MB / 缩略图 2MB），超限直接拒绝避免无界占内存。
+    pub async fn read_file_bytes(&self, path: &str, max_bytes: u64) -> Result<Vec<u8>> {
+        let limit_label = if max_bytes >= 1024 * 1024 {
+            format!("{}MB", max_bytes / 1024 / 1024)
+        } else {
+            format!("{}KB", max_bytes / 1024)
+        };
+        let size = self.file_size(path).await?;
+        if size > max_bytes {
+            return Err(Error::Sftp(format!(
+                "{path} 超过 {limit_label}，不支持读取"
+            )));
+        }
+
+        let mut file = self.open_read(path).await?;
+        let mut buf = Vec::with_capacity(size as usize);
+        let mut chunk = vec![0u8; 64 * 1024];
+        loop {
+            let n = file
+                .read(&mut chunk)
+                .await
+                .map_err(|e| Error::Sftp(format!("读取 {path} 失败: {e}")))?;
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            if buf.len() as u64 > max_bytes {
+                return Err(Error::Sftp(format!(
+                    "{path} 超过 {limit_label}，不支持读取"
+                )));
+            }
+        }
+        Ok(buf)
+    }
+
     /// 读整个文本文件（UTF-8）。大小上限与前端预览限制一致。
     pub async fn read_file(&self, path: &str) -> Result<String> {
         const MAX_TEXT_BYTES: u64 = 2 * 1024 * 1024;
@@ -502,6 +534,17 @@ pub(crate) fn join_remote(dir: &str, name: &str) -> String {
     } else {
         format!("{dir}/{name}")
     }
+}
+
+/// 拼装 exec 命令行：program 与每个 arg 逐个 POSIX 单引号包裹
+/// （内部 ' 转义为 '\''）杜绝注入；session.exec 与 archive.rs 共用。
+pub(crate) fn build_command(program: &str, args: &[String]) -> String {
+    let mut command = shell_quote(program);
+    for arg in args {
+        command.push(' ');
+        command.push_str(&shell_quote(arg));
+    }
+    command
 }
 
 /// exec 命令结果（UTF-8 lossy 解码）。

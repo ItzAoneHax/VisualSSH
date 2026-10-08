@@ -339,6 +339,25 @@ pub async fn ssh_read_file(
         .map_err(|_| Error::Timeout)?
 }
 
+/// 读取文件字节并 base64 编码（图片预览/缩略图内存直读；上限由前端按用途传入）。
+#[tauri::command]
+pub async fn ssh_read_file_base64(
+    connection_id: String,
+    path: String,
+    max_bytes: u64,
+    state: State<'_, AppState>,
+) -> Result<String> {
+    use base64::Engine as _;
+    let handle = state
+        .get(&connection_id)
+        .ok_or_else(|| Error::NoSession(connection_id.clone()))?;
+    let session = handle.session.lock().await;
+    let bytes = tokio::time::timeout(IO_TIMEOUT, session.read_file_bytes(&path, max_bytes))
+        .await
+        .map_err(|_| Error::Timeout)??;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 /// 读取符号链接目标（属性对话框）。
 #[tauri::command]
 pub async fn ssh_read_link(
@@ -467,12 +486,14 @@ pub async fn ssh_disconnect(
     stats: State<'_, std::sync::Arc<crate::stats::StatsManager>>,
     search: State<'_, Arc<crate::search::SearchManager>>,
     walks: State<'_, Arc<crate::walk::WalkManager>>,
+    archives: State<'_, Arc<crate::archive::ArchiveManager>>,
 ) -> Result<()> {
     transfers.cancel_for_connection(&connection_id);
     terminals.close_for_connection(&connection_id);
     stats.cancel_for_connection(&connection_id);
     search.cancel_for_connection(&connection_id);
     walks.cancel_for_connection(&connection_id);
+    archives.cancel_for_connection(&connection_id);
     if let Some(handle) = state.remove(&connection_id) {
         handle.mark_intentional_close();
         let session = handle.session.lock().await;

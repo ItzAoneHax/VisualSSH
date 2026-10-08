@@ -78,6 +78,15 @@ export function readFileSsh(connectionId: string, path: string): Promise<string>
   return invoke("ssh_read_file", { connectionId, path });
 }
 
+/** 读文件字节（base64；图片预览 ≤10MB / 缩略图 ≤2MB，上限由前端按用途传入） */
+export function readFileBase64(
+  connectionId: string,
+  path: string,
+  maxBytes: number,
+): Promise<string> {
+  return invoke("ssh_read_file_base64", { connectionId, path, maxBytes });
+}
+
 /** 原子写回（同目录临时文件 + rename） */
 export function writeFileSsh(
   connectionId: string,

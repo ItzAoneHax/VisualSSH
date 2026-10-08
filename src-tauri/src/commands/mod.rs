@@ -1,3 +1,4 @@
+pub mod archive;
 pub mod clipboard;
 pub mod credentials;
 pub mod ssh;

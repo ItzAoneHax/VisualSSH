@@ -1,3 +1,4 @@
+mod archive;
 mod clipboard_image;
 mod clipboard_vfile;
 mod commands;
@@ -18,6 +19,7 @@ pub fn run() {
         .manage(std::sync::Arc::new(terminal::TerminalManager::default()))
         .manage(std::sync::Arc::new(stats::StatsManager::default()))
         .manage(std::sync::Arc::new(search::SearchManager::default()))
+        .manage(std::sync::Arc::new(archive::ArchiveManager::default()))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
@@ -32,6 +34,9 @@ pub fn run() {
             commands::ssh_delete,
             commands::ssh_chmod,
             commands::ssh_read_file,
+            commands::ssh_read_file_base64,
+            commands::archive::ssh_archive_start,
+            commands::archive::ssh_archive_cancel,
             commands::ssh_write_file,
             commands::ssh_read_link,
             commands::ssh_exec,
