@@ -69,6 +69,16 @@ export interface AppSettings {
   editorReadOnlyDefault: boolean;
   /** 传输完成系统通知（第四阶段 C1；默认开） */
   transferNotify: boolean;
+  /** 信息窗格开关（Files IsInfoPaneEnabled，默认关） */
+  infoPaneEnabled: boolean;
+  /** 信息窗格当前 tab（Files InfoPaneTabs，默认详情） */
+  infoPaneTab: "details" | "preview";
+  /** 信息窗格右侧模式宽度（Files VerticalSizePx，默认 250） */
+  infoPaneWidth: number;
+  /** 信息窗格底部模式高度（Files HorizontalSizePx，默认 300） */
+  infoPaneHeight: number;
+  /** 表格图片缩略图（块 B，默认开） */
+  showThumbnails: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -97,6 +107,11 @@ const DEFAULTS: AppSettings = {
   restoreLastDir: true,
   editorReadOnlyDefault: false,
   transferNotify: true,
+  infoPaneEnabled: false,
+  infoPaneTab: "details",
+  infoPaneWidth: 250,
+  infoPaneHeight: 300,
+  showThumbnails: true,
 };
 
 function load(): AppSettings {
@@ -122,7 +137,14 @@ function load(): AppSettings {
     if (![28, 36, 40, 44, 48].includes(parsed.detailsRowHeight ?? 36)) {
       parsed.detailsRowHeight = 36;
     }
-    return { ...DEFAULTS, ...parsed };
+    const merged = { ...DEFAULTS, ...parsed };
+    // 信息窗格 tab 只接受两值；宽高下限 100（Files InfoPaneSettingsService Math.Max(100d, …)）
+    if (merged.infoPaneTab !== "details" && merged.infoPaneTab !== "preview") {
+      merged.infoPaneTab = "details";
+    }
+    merged.infoPaneWidth = Math.min(1600, Math.max(100, Math.round(merged.infoPaneWidth)));
+    merged.infoPaneHeight = Math.min(1600, Math.max(100, Math.round(merged.infoPaneHeight)));
+    return merged;
   } catch {
     return { ...DEFAULTS };
   }

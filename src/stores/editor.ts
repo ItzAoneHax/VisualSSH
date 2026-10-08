@@ -4,20 +4,11 @@ import { computed, ref } from "vue";
 import { readFileSsh, writeFileSsh } from "@/api/ssh";
 import type { FileEntry } from "@/types";
 import { joinPath } from "@/utils/format";
+import { extOf, TEXT_EXTS } from "@/utils/preview";
 import { useSettingsStore } from "@/stores/settings";
-
-/** 文本预览白名单（提示词 M4 清单） */
-const TEXT_EXTS = new Set([
-  "txt", "json", "yaml", "yml", "log", "md", "conf", "ini", "toml", "env", "sh", "py",
-]);
 
 /** 预览大小上限（与后端 read_file 一致） */
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
-
-function extOf(name: string): string {
-  const dot = name.lastIndexOf(".");
-  return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
-}
 
 /** Markdown 预览态（仅 .md：双击默认预览，可切源码） */
 export type PreviewMode = "preview" | "source";

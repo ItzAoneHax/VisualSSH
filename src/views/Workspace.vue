@@ -8,6 +8,7 @@ import {
   FolderTree,
   HardDrive,
   House,
+  PanelRight,
   PinOff,
   ScrollText,
   Search,
@@ -20,6 +21,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ContextMenu from "@/components/common/ContextMenu.vue";
 import type { MenuItem } from "@/components/common/DropdownMenu.vue";
 import ConflictDialog from "@/components/explorer/ConflictDialog.vue";
+import InfoPane from "@/components/explorer/InfoPane.vue";
 import EditorDrawer from "@/components/workspace/EditorDrawer.vue";
 import ExplorerPane from "@/components/workspace/ExplorerPane.vue";
 import SearchBox from "@/components/workspace/SearchBox.vue";
@@ -136,6 +138,83 @@ function onSplitterDblClick() {
   const tab = activeTab.value;
   if (tab) tab.paneRatio = 50;
 }
+
+/** —— 信息窗格（第五阶段块 A，Files InfoPane.UpdatePosition 语义）：
+ *  位置不是偏好而是实时计算——主行容器宽 >700px 贴右侧，否则切底部（InfoPane.xaml.cs:40-54）；
+ *  窗口过小整体隐藏（MainPage.xaml.cs:478-479 显示门槛的远端版）；宽/高各自记忆（右宽 250 /
+ *  底高 300，下限 100，InfoPaneSettingsService.cs:14-24），双击分隔条恢复默认宽/高 —— */
+const infoMainRef = ref<HTMLElement | null>(null);
+const infoAreaWidth = ref(0);
+const winSize = ref({ w: window.innerWidth, h: window.innerHeight });
+let infoResizeObserver: ResizeObserver | null = null;
+
+const infoPosition = computed<"right" | "bottom">(() =>
+  infoAreaWidth.value > 700 ? "right" : "bottom",
+);
+const infoPaneVisible = computed(
+  () =>
+    settings.settings.infoPaneEnabled &&
+    !(winSize.value.w <= 450 && winSize.value.h <= 450),
+);
+
+/** 拖拽期间的实时值（pointerup 才写回设置，避免每帧持久化）；null = 用记忆值 */
+const infoDragSize = ref<number | null>(null);
+const infoWidth = computed(
+  () => infoDragSize.value ?? settings.settings.infoPaneWidth,
+);
+const infoHeight = computed(
+  () => infoDragSize.value ?? settings.settings.infoPaneHeight,
+);
+
+function onInfoSplitterDown(e: PointerEvent) {
+  const vertical = infoPosition.value === "right";
+  const start = vertical ? e.clientX : e.clientY;
+  const startSize = vertical ? settings.settings.infoPaneWidth : settings.settings.infoPaneHeight;
+  // 上限 = 主行区域的 80%（areaRef 与窗格同级，宽度即该向可用空间）
+  const total = vertical ? infoAreaWidth.value : infoMainRef.value?.clientHeight ?? 0;
+  const onMove = (ev: PointerEvent) => {
+    const delta = vertical ? start - ev.clientX : start - ev.clientY;
+    infoDragSize.value = Math.min(total * 0.8, Math.max(100, startSize + delta));
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    const size = infoDragSize.value;
+    infoDragSize.value = null;
+    if (size == null) return;
+    settings.update(vertical ? { infoPaneWidth: size } : { infoPaneHeight: size });
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+
+function onInfoSplitterDblClick() {
+  if (infoPosition.value === "right") settings.update({ infoPaneWidth: 250 });
+  else settings.update({ infoPaneHeight: 300 });
+}
+
+function toggleInfoPane() {
+  settings.update({ infoPaneEnabled: !settings.settings.infoPaneEnabled });
+}
+
+function onWinResize() {
+  winSize.value = { w: window.innerWidth, h: window.innerHeight };
+}
+
+onMounted(() => {
+  infoResizeObserver = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      infoAreaWidth.value = entry.contentRect.width;
+    }
+  });
+  if (infoMainRef.value) infoResizeObserver.observe(infoMainRef.value);
+  window.addEventListener("resize", onWinResize);
+});
+
+onBeforeUnmount(() => {
+  infoResizeObserver?.disconnect();
+  window.removeEventListener("resize", onWinResize);
+});
 
 /** 挂载：建立工作区会话（单标签单窗格）并加载初始目录。
  *  App 以「是否在主页」控制本组件挂载，连接数变化不重建（多标签共存） */
@@ -294,6 +373,12 @@ async function onKeydown(e: KeyboardEvent) {
       e.preventDefault();
       workspace.focusOtherPane();
     }
+    return;
+  }
+  if (e.ctrlKey && e.altKey && !e.shiftKey && e.key.toLowerCase() === "i") {
+    // Ctrl+Alt+I 信息窗格（Files ToggleInfoPaneAction，HotKey = Keys.I + CtrlAlt）
+    e.preventDefault();
+    toggleInfoPane();
     return;
   }
   if (!e.ctrlKey) return;
@@ -548,7 +633,7 @@ watch(
     <!-- 标签条：仅工作区视图（本组件即工作区视图；主页/设置不挂载本组件） -->
     <TabBar @new-tab="onNewTabRequest($event)" @reopen-tab="onReopenTab" />
 
-    <div class="flex min-h-0 flex-1">
+    <div ref="infoMainRef" class="flex min-h-0 flex-1">
       <!-- 侧栏：裸 Mica 层（无边框），32px 导航项 + 3px 强调指示条 -->
       <aside class="flex w-56 shrink-0 flex-col py-2 pl-1.5">
         <nav aria-label="导航">
@@ -634,6 +719,17 @@ watch(
             <button
               type="button"
               class="btn-icon"
+              :class="settings.settings.infoPaneEnabled && 'text-accent'"
+              title="信息窗格（Ctrl+Alt+I）"
+              aria-label="信息窗格开关"
+              @click="toggleInfoPane"
+            >
+              <PanelRight :size="16" />
+            </button>
+
+            <button
+              type="button"
+              class="btn-icon"
               title="分屏（Alt+Shift+V 左右 / Alt+Shift+H 上下）"
               aria-label="分屏"
               @click="toggleSplit()"
@@ -675,6 +771,17 @@ watch(
             </button>
 
             <TransferCenter />
+
+            <button
+              type="button"
+              class="btn-icon"
+              :class="settings.settings.infoPaneEnabled && 'text-accent'"
+              title="信息窗格（Ctrl+Alt+I）"
+              aria-label="信息窗格开关"
+              @click="toggleInfoPane"
+            >
+              <PanelRight :size="16" />
+            </button>
 
             <button
               type="button"
@@ -723,7 +830,43 @@ watch(
             </div>
           </div>
         </template>
+
+        <!-- 信息窗格（底部模式）：主列内、状态栏上方；分隔条同分屏视觉（拖拽/双击恢复默认） -->
+        <template v-if="infoPaneVisible && infoPosition === 'bottom'">
+          <div
+            class="relative h-1 w-full shrink-0 cursor-row-resize"
+            role="separator"
+            aria-orientation="horizontal"
+            title="拖拽调整高度 · 双击恢复默认"
+            @pointerdown="onInfoSplitterDown"
+            @dblclick="onInfoSplitterDblClick"
+          >
+            <span
+              class="absolute top-1/2 left-1/2 h-[2px] w-8 -translate-x-1/2 -translate-y-1/2 rounded-full"
+              :style="{ background: infoDragSize != null ? 'var(--accent)' : 'var(--line-strong)' }"
+            />
+          </div>
+          <InfoPane class="shrink-0" :style="{ height: `${infoHeight}px` }" />
+        </template>
       </div>
+
+      <!-- 信息窗格（右侧模式）：主行内、主列之后（与侧栏对称） -->
+      <template v-if="infoPaneVisible && infoPosition === 'right'">
+        <div
+          class="relative w-1 shrink-0 cursor-col-resize self-stretch"
+          role="separator"
+          aria-orientation="vertical"
+          title="拖拽调整宽度 · 双击恢复默认"
+          @pointerdown="onInfoSplitterDown"
+          @dblclick="onInfoSplitterDblClick"
+        >
+          <span
+            class="absolute top-1/2 left-1/2 h-8 w-[2px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+            :style="{ background: infoDragSize != null ? 'var(--accent)' : 'var(--line-strong)' }"
+          />
+        </div>
+        <InfoPane class="shrink-0" :style="{ width: `${infoWidth}px` }" />
+      </template>
     </div>
 
     <!-- 通栏状态栏：项目统计 + 连接状态（全宽一条，底部唯一收边；可在设置中隐藏） -->

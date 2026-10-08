@@ -12,9 +12,7 @@ import {
 import { EditorState, Compartment, type Extension } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 import { EditorView, keymap } from "@codemirror/view";
-import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
-import { tags as t } from "@lezer/highlight";
-import MarkdownIt from "markdown-it";
+import { syntaxHighlighting } from "@codemirror/language";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import Modal from "@/components/common/Modal.vue";
@@ -22,6 +20,8 @@ import EditorSearchWidget from "@/components/workspace/EditorSearchWidget.vue";
 import { createEditorSearch } from "@/composables/editorSearch";
 import { useEditorStore } from "@/stores/editor";
 import { useSettingsStore } from "@/stores/settings";
+import { renderMarkdown } from "@/utils/markdown";
+import { cmHighlight, cmTheme, loadLanguageExt } from "@/utils/editorLanguage";
 
 /**
  * 悬浮编辑窗：覆盖全页的模糊遮罩（Acrylic 层）+ 居中亚克力窗体
@@ -51,107 +51,13 @@ const pos = ref<{ x: number; y: number } | null>(null);
 const languageComp = new Compartment();
 const readOnlyComp = new Compartment();
 
-/** 语法高亮色走 CSS 变量（main.css 定义亮暗两套） */
-const cmHighlight = HighlightStyle.define([
-  { tag: [t.keyword, t.operator], color: "var(--cm-keyword)" },
-  { tag: [t.string, t.special(t.string)], color: "var(--cm-string)" },
-  { tag: [t.number, t.bool, t.null], color: "var(--cm-number)" },
-  { tag: [t.comment], color: "var(--cm-comment)", fontStyle: "italic" },
-  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: "var(--cm-function)" },
-  { tag: [t.propertyName, t.definition(t.propertyName)], color: "var(--cm-property)" },
-  { tag: t.typeName, color: "var(--cm-type)" },
-]);
-
 /** 字号走 compartment（设置页变更即时生效） */
 const fontSizeComp = new Compartment();
 const fontSizeTheme = (px: number) =>
   EditorView.theme({ "&": { fontSize: `${px}px` } });
 
-const cmTheme = EditorView.theme({
-  "&": {
-    height: "100%",
-    backgroundColor: "transparent",
-    color: "var(--ink)",
-  },
-  ".cm-content": { fontFamily: "var(--font-mono)", paddingBottom: "12px" },
-  ".cm-scroller": { overflow: "auto", lineHeight: "1.6" },
-  ".cm-gutters": {
-    backgroundColor: "transparent",
-    color: "var(--faint)",
-    border: "none",
-    borderRight: "1px solid var(--line)",
-    fontFamily: "var(--font-mono)",
-    fontSize: "12px",
-  },
-  ".cm-lineNumbers .cm-gutterElement": {
-    minWidth: "44px",
-    paddingRight: "12px",
-  },
-  ".cm-activeLine": { backgroundColor: "var(--fill-subtle)" },
-  ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--ink)" },
-  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
-    backgroundColor: "color-mix(in srgb, var(--accent) 25%, transparent)",
-  },
-  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--accent)" },
-  ".cm-searchMatch": {
-    backgroundColor: "color-mix(in srgb, var(--accent) 20%, transparent)",
-    borderRadius: "2px",
-  },
-  ".cm-searchMatch-selected": {
-    backgroundColor: "color-mix(in srgb, var(--accent) 45%, transparent)",
-  },
-});
-
-/** 按扩展名懒加载语言包（Vite 自动分包） */
-const LANG_LOADERS: Record<string, () => Promise<Extension>> = {
-  json: () => import("@codemirror/lang-json").then((m) => m.json()),
-  yaml: () => import("@codemirror/lang-yaml").then((m) => m.yaml()),
-  yml: () => import("@codemirror/lang-yaml").then((m) => m.yaml()),
-  md: () => import("@codemirror/lang-markdown").then((m) => m.markdown()),
-  py: () => import("@codemirror/lang-python").then((m) => m.python()),
-  sh: () =>
-    import("@codemirror/legacy-modes/mode/shell")
-      .then((m) => StreamLanguage.define(m.shell))
-      .then((sl) => sl),
-  toml: () =>
-    import("@codemirror/legacy-modes/mode/toml")
-      .then((m) => StreamLanguage.define(m.toml))
-      .then((sl) => sl),
-  conf: () =>
-    import("@codemirror/legacy-modes/mode/properties")
-      .then((m) => StreamLanguage.define(m.properties))
-      .then((sl) => sl),
-  ini: () =>
-    import("@codemirror/legacy-modes/mode/properties")
-      .then((m) => StreamLanguage.define(m.properties))
-      .then((sl) => sl),
-  env: () =>
-    import("@codemirror/legacy-modes/mode/properties")
-      .then((m) => StreamLanguage.define(m.properties))
-      .then((sl) => sl),
-};
-
-function extOf(name: string): string {
-  const dot = name.lastIndexOf(".");
-  return dot < 0 ? "" : name.slice(dot + 1).toLowerCase();
-}
-
-/**
- * Markdown 渲染：html:false 转义内嵌 HTML（远程文件内容不可信，防 XSS），
- * 链接强制新窗口 + noopener。
- */
-const md = new MarkdownIt({ html: false, linkify: true, breaks: false });
-const defaultLinkOpen =
-  md.renderer.rules.link_open ??
-  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
-md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
-  tokens[idx].attrSet("target", "_blank");
-  tokens[idx].attrSet("rel", "noopener noreferrer");
-  return defaultLinkOpen(tokens, idx, options, env, self);
-};
-
 /** 预览内容随源码实时联动（源码态编辑后切回预览即为最新） */
-const renderedHtml = computed(() => md.render(editor.doc));
+const renderedHtml = computed(() => renderMarkdown(editor.doc));
 
 /** 预览态点「编辑」：一步切到源码并进入可写 */
 function onEditClick() {
@@ -208,18 +114,9 @@ async function mountEditor() {
 async function loadLanguage() {
   if (!view) return;
   const epoch = ++langEpoch;
-  const loader = LANG_LOADERS[extOf(editor.fileName)];
-  if (!loader) {
-    view.dispatch({ effects: languageComp.reconfigure([]) });
-    return;
-  }
-  try {
-    const ext = await loader();
-    if (epoch !== langEpoch || !view) return;
-    view.dispatch({ effects: languageComp.reconfigure(ext) });
-  } catch {
-    // 语言包加载失败：退回纯文本
-  }
+  const ext = await loadLanguageExt(editor.fileName);
+  if (epoch !== langEpoch || !view) return;
+  view.dispatch({ effects: languageComp.reconfigure(ext ? [ext] : []) });
 }
 
 function destroyEditor() {
