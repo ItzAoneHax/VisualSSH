@@ -7,6 +7,7 @@ import { useTerminalStore } from "@/stores/terminal";
 import { useTransferStore } from "@/stores/transfer";
 import type { SshProfile, SshProfileInput, TestState } from "@/types";
 import { dropDirCache } from "@/utils/dirCache";
+import { backoffDelaySec, MAX_RECONNECT_ATTEMPTS } from "@/utils/reconnectBackoff";
 import { useWorkspaceStore } from "@/stores/workspace";
 
 const STORAGE_KEY = "visualssh:profiles:v1";
@@ -269,10 +270,10 @@ export const useConnectionsStore = defineStore("connections", () => {
     const ctl = { cancelled: false, immediate: false };
     reconnectCtl.set(connectionId, ctl);
     try {
-      for (let attempt = 1; attempt <= 5; attempt++) {
+      for (let attempt = 1; attempt <= MAX_RECONNECT_ATTEMPTS; attempt++) {
         patchConn(connectionId, { reconnectAttempt: attempt });
         // 指数退避等待（可被打断：取消 / 立即重连）
-        const waitSec = 2 ** (attempt - 1);
+        const waitSec = backoffDelaySec(attempt);
         const deadline = Date.now() + waitSec * 1000;
         while (Date.now() < deadline) {
           if (ctl.cancelled || ctl.immediate) break;
@@ -311,7 +312,7 @@ export const useConnectionsStore = defineStore("connections", () => {
       }
       patchConn(connectionId, {
         state: "failed",
-        reconnectHint: `已重试 ${5} 次仍未成功`,
+        reconnectHint: `已重试 ${MAX_RECONNECT_ATTEMPTS} 次仍未成功`,
       });
     } finally {
       reconnectCtl.delete(connectionId);

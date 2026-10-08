@@ -15,6 +15,7 @@ import { useConflictStore, type ConflictGroup, type MultiDecisions } from "@/sto
 import { useToastStore } from "@/stores/toast";
 import { useTransferStore } from "@/stores/transfer";
 import { dirCacheOf } from "@/utils/dirCache";
+import { jobsFromOutput, renamesFromDecisions, type BatchJob } from "@/utils/batchPlan";
 import type { FileEntry } from "@/types";
 import { joinPath, pathBaseName } from "@/utils/format";
 
@@ -29,17 +30,6 @@ import { joinPath, pathBaseName } from "@/utils/format";
  * 失败清单可整批重试（跳过冲突直接覆盖——首次执行已做过冲突决策）。
  * 落点语义同 Files：下载文件夹 foo 到 D → D/foo/...；上传 foo 到 /target → /target/foo/...
  */
-
-/** 批内一个待传文件 */
-interface BatchJob {
-  /** 清单相对路径（posix，冲突改名后的最终相对路径） */
-  rel: string;
-  size: number;
-  /** 传输一端的完整路径（下载=远端；上传=本地） */
-  src: string;
-  /** 另一端的完整路径（下载=本地；上传=远端） */
-  dst: string;
-}
 
 /** 子行 id 容器（取消句柄与编排循环共享；ids 与入队 jobs 同序一一对应） */
 interface ChildRef {
@@ -59,26 +49,6 @@ function localJoin(root: string, rel: string): string {
 function posixParent(p: string): string | null {
   const idx = p.lastIndexOf("/");
   return idx < 0 ? null : idx === 0 ? "/" : p.slice(0, idx);
-}
-
-/** 决策表（决策目录 → 各项决策）展开为改名映射：批次相对路径 → 最终相对路径。
- *  dirToRel 把决策目录（下载=本地绝对 / 上传=远端绝对）还原为批次相对父目录。 */
-function renamesFromDecisions(
-  decisions: MultiDecisions,
-  dirToRel: (dir: string) => string,
-): Map<string, string> {
-  const renames = new Map<string, string>();
-  for (const [dir, list] of decisions) {
-    const parentRel = dirToRel(dir);
-    for (const d of list) {
-      if (d.action !== "proceed" || d.finalName === d.name) continue;
-      renames.set(
-        parentRel ? `${parentRel}/${d.name}` : d.name,
-        parentRel ? `${parentRel}/${d.finalName}` : d.finalName,
-      );
-    }
-  }
-  return renames;
 }
 
 /** 批次执行：逐文件入队（现有管线）→ 等待终态 → 卡片收尾 + 失败重试句柄。
@@ -297,15 +267,14 @@ export async function downloadFolderTo(connectionId: string, remoteDir: string):
   const renames = renamesFromDecisions(decisions, (dir) =>
     dir === localTarget ? "" : dir.slice(localTarget.length + 1).replace(/\\/g, "/"),
   );
-  const jobs: BatchJob[] = listFiles.map((f) => {
-    const rel = renames.get(f.path) ?? f.path;
-    return {
-      rel,
-      size: f.size,
+  const jobs: BatchJob[] = jobsFromOutput(
+    output,
+    (rel, finalRel) => ({
       src: joinPath(remoteDir, rel),
-      dst: localJoin(localTarget, rel),
-    };
-  });
+      dst: localJoin(localTarget, finalRel),
+    }),
+    renames,
+  );
 
   await runBatchJobs(
     batchId,
@@ -412,15 +381,14 @@ export async function uploadFolderTo(
   const renames = renamesFromDecisions(decisions, (dir) =>
     dir === remoteRoot ? "" : dir.slice(remoteRoot.length + 1),
   );
-  const jobs: BatchJob[] = listFiles.map((f) => {
-    const rel = renames.get(f.path) ?? f.path;
-    return {
-      rel,
-      size: f.size,
+  const jobs: BatchJob[] = jobsFromOutput(
+    output,
+    (rel, finalRel) => ({
       src: localJoin(localDir, rel),
-      dst: joinPath(remoteRoot, rel),
-    };
-  });
+      dst: joinPath(remoteRoot, finalRel),
+    }),
+    renames,
+  );
 
   await runBatchJobs(
     batchId,

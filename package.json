@@ -10,7 +10,8 @@
     "typecheck": "vue-tsc --noEmit",
     "preview": "vite preview",
     "tauri": "tauri",
-    "exe": "node scripts/pack-exe.mjs"
+    "exe": "node scripts/pack-exe.mjs",
+    "test": "node --experimental-strip-types scripts/test-phase4.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
