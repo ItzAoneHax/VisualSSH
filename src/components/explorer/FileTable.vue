@@ -352,12 +352,16 @@ function hitTest(x1: number, y1: number, x2: number, y2: number): string[] {
 
 function onContainerPointerDown(e: PointerEvent) {
   if (e.button !== 0) return;
-  // 按钮/输入框不启动框选；行上按下也不启动——行可拖拽（M7 行内拖拽），
-  // 行上拖动 = 移动/复制文件，点击/多选仍由行自身处理
-  if ((e.target as HTMLElement).closest("button, input, textarea, [contenteditable], [data-row]")) return;
+  // 按钮/输入框不启动框选。行上按下也允许启动：真机 WebView2（Tauri 接管拖放）
+  // 不派发 HTML5 dragstart，行内拖拽不可用——行上拖动回落为框选（Win11 Explorer
+  // 同款手感）；支持 HTML5 DnD 的环境里 dragstart 触发 pointercancel 中止框选并
+  // 还原按下时的选择快照，行拖拽语义不受影响。
+  if ((e.target as HTMLElement).closest("button, input, textarea, [contenteditable]")) return;
+  const onRow = !!(e.target as HTMLElement).closest("[data-row]");
   const startX = e.clientX;
   const startY = e.clientY;
   const additive = e.ctrlKey;
+  const snapshot = [...explorer.selectedNames];
   let moved = false;
   let raf = 0;
 
@@ -380,21 +384,32 @@ function onContainerPointerDown(e: PointerEvent) {
       }
     }
   };
-  const onUp = (ev: PointerEvent) => {
+  const cleanup = () => {
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", onCancel);
     if (raf) cancelAnimationFrame(raf);
-    if (moved) {
-      explorer.applyRubberSelection(hitTest(startX, startY, ev.clientX, ev.clientY), additive);
-    } else {
-      // 未拖动的空白单击：清除选择（行上的单击交给行自身 click 处理）
-      explorer.clearSelection();
-    }
     rubber.value = null;
     rubberActive.value = false;
   };
+  // drag 会话接管（浏览器环境行拖拽）：中止框选；拖动已污染的选择还原快照
+  //（行拖拽携带按下时的选中集合，Files 语义）
+  const onCancel = () => {
+    cleanup();
+    if (moved) explorer.applyRubberSelection(snapshot, false);
+  };
+  const onUp = (ev: PointerEvent) => {
+    cleanup();
+    if (moved) {
+      explorer.applyRubberSelection(hitTest(startX, startY, ev.clientX, ev.clientY), additive);
+    } else if (!onRow) {
+      // 未拖动的空白单击：清除选择（行上的单击选中交给行自身处理）
+      explorer.clearSelection();
+    }
+  };
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
+  window.addEventListener("pointercancel", onCancel);
 }
 
 /** —— 行内拖拽（M7 步骤 4）：行 draggable，dragstart 写自定义载荷 + 「N 项」拖影；
