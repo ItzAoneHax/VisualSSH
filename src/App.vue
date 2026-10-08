@@ -106,6 +106,7 @@ onMounted(() => {
   for (const r of transfers.rows) {
     if (r.status !== "queued" && r.status !== "running") counted.add(r.id);
   }
+  void connections.bindDisconnectEvents();
   if (!("__TAURI_INTERNALS__" in window)) return;
   void (async () => {
     try {

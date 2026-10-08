@@ -13,6 +13,7 @@ import {
   Search,
   Settings,
   SquareTerminal,
+  TriangleAlert,
 } from "@lucide/vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
@@ -64,6 +65,11 @@ const terminalStore = useTerminalStore();
 const settings = useSettingsStore();
 const pinnedStore = usePinnedStore();
 const exitGuard = useExitGuardStore();
+
+/** D4 断线横幅数据：非正常连接态的连接（reconnecting/disconnected/failed） */
+const brokenConnections = computed(() =>
+  Object.values(connections.byId).filter((c) => c.state !== "connected"),
+);
 
 /** 活动标签（computed 保响应性：切标签时状态栏/侧栏/连接随之切换） */
 const activeTab = computed(() => workspace.activeTab);
@@ -503,6 +509,42 @@ watch(
 
 <template>
   <div v-if="connections.active" class="flex h-full flex-col">
+    <!-- D4 断线横幅：非正常连接态的连接逐一显示 -->
+    <div
+      v-for="conn in brokenConnections"
+      :key="conn.connectionId"
+      class="flex shrink-0 items-center gap-3 px-4 py-2 text-sm"
+      :style="{ background: 'color-mix(in srgb, var(--danger) 14%, var(--panel-solid, var(--surface-solid, #1a1a1a)))' }"
+      role="alert"
+    >
+      <TriangleAlert :size="16" class="shrink-0" :style="{ color: 'var(--danger)' }" />
+      <span class="min-w-0 flex-1 truncate">
+        <template v-if="conn.state === 'reconnecting'">
+          {{ conn.alias }} 连接已断开 · 正在重连（第 {{ conn.reconnectAttempt }}/5 次）
+        </template>
+        <template v-else-if="conn.state === 'failed'">
+          {{ conn.alias }} 重连失败<template v-if="conn.reconnectHint"> — {{ conn.reconnectHint }}</template>
+        </template>
+        <template v-else>
+          {{ conn.alias }} 连接已断开<template v-if="conn.reconnectHint"> — {{ conn.reconnectHint }}</template>
+        </template>
+      </span>
+      <button
+        type="button"
+        class="btn-secondary h-7 shrink-0 px-2.5 text-xs"
+        @click="connections.reconnectNow(conn.connectionId)"
+      >
+        立即重连
+      </button>
+      <button
+        type="button"
+        class="btn-secondary h-7 shrink-0 px-2.5 text-xs"
+        @click="connections.cancelReconnect(conn.connectionId)"
+      >
+        取消
+      </button>
+    </div>
+
     <!-- 标签条：仅工作区视图（本组件即工作区视图；主页/设置不挂载本组件） -->
     <TabBar @new-tab="onNewTabRequest($event)" @reopen-tab="onReopenTab" />
 

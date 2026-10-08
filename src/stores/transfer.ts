@@ -105,6 +105,18 @@ const remoteOpCancels = new Map<string, () => void>();
 /** 聚合卡动作句柄登记（cancel/retryFailed 由编排层闭包实现） */
 const batchHandles = new Map<string, BatchHandle>();
 
+/** 单文件重试参数登记（断连失败后可重试；D3） */
+interface RetryInfo {
+  direction: "upload" | "download";
+  connectionId: string;
+  /** 上传=本地路径；下载=远端路径 */
+  src: string;
+  /** 上传=远端目录；下载=本地路径 */
+  dst: string;
+  fileName: string;
+}
+const retryInfos = new Map<string, RetryInfo>();
+
 export const useTransferStore = defineStore("transfer", () => {
   /** 最新在前 */
   const rows = ref<TransferRow[]>([]);
@@ -199,6 +211,13 @@ export const useTransferStore = defineStore("transfer", () => {
     });
     try {
       await uploadTransfer(id, connectionId, localPath, joinPath(remoteDir, fileName));
+      retryInfos.set(id, {
+        direction: "upload",
+        connectionId,
+        src: localPath,
+        dst: remoteDir,
+        fileName,
+      });
     } catch (e) {
       applyEvent({
         transferId: id,
@@ -244,6 +263,13 @@ export const useTransferStore = defineStore("transfer", () => {
     });
     try {
       await downloadTransfer(id, connectionId, remotePath, localPath);
+      retryInfos.set(id, {
+        direction: "download",
+        connectionId,
+        src: remotePath,
+        dst: localPath,
+        fileName,
+      });
     } catch (e) {
       applyEvent({
         transferId: id,
@@ -448,6 +474,53 @@ export const useTransferStore = defineStore("transfer", () => {
     return batchHandles.get(batchId)?.canRetry() ?? false;
   }
 
+  /** —— D3 断连联动 —— */
+
+  /** 连接断开：该连接全部活动行置失败（后端已取消任务），批次卡转失败并释放句柄 */
+  function markConnectionLost(connectionId: string) {
+    void connectionId;
+    for (const handle of batchHandles.values()) handle.cancel();
+    batchHandles.clear();
+    for (const row of rows.value) {
+      if (row.status !== "queued" && row.status !== "running") continue;
+      if (row.batchId || !row.batch) {
+        // 子行与普通行
+        row.status = "failed";
+        row.error = "连接已断开";
+        row.speedBps = 0;
+      } else {
+        // 顶层批次卡
+        row.status = "failed";
+        row.batch.phase = "transferring";
+        row.batch.error = "连接已断开";
+      }
+    }
+  }
+
+  /** 重连成功：重试参数指向新连接标识 */
+  function remapConnection(oldId: string, newId: string) {
+    for (const info of retryInfos.values()) {
+      if (info.connectionId === oldId) info.connectionId = newId;
+    }
+  }
+
+  /** 行级重试（断连失败的传输；用当前连接标识重新入队） */
+  function retryRow(id: string) {
+    const info = retryInfos.get(id);
+    const row = rows.value.find((r) => r.id === id);
+    if (!info || !row || row.status !== "failed") return;
+    if (info.direction === "upload") {
+      void startUpload(info.connectionId, info.src, info.dst, info.fileName);
+    } else {
+      void startDownloadTo(info.connectionId, info.src, info.dst);
+    }
+    removeRow(id);
+  }
+
+  function hasRowRetry(id: string): boolean {
+    return retryInfos.has(id);
+  }
+
   return {
     rows,
     activeCount,
@@ -465,6 +538,10 @@ export const useTransferStore = defineStore("transfer", () => {
     cancelBatch,
     retryBatch,
     hasBatchRetry,
+    markConnectionLost,
+    remapConnection,
+    retryRow,
+    hasRowRetry,
     waitAllDone,
     cancel,
     removeRow,

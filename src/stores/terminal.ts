@@ -228,6 +228,15 @@ export const useTerminalStore = defineStore("terminal", () => {
     return activeSession.value?.outputLog ?? [];
   }
 
+  /** 连接断开（块 D）：该连接会话标记退出（终端进程无法恢复，面板按已退出呈现，
+   *  重连后用户重新打开即可——openIn 会新建会话） */
+  function markConnectionLost(connectionId: string) {
+    const session = sessions.value.get(connectionId);
+    if (session && !session.exited) {
+      session.exited = true;
+    }
+  }
+
   return {
     open,
     activeConnectionId,
@@ -244,5 +253,6 @@ export const useTerminalStore = defineStore("terminal", () => {
     close,
     reset,
     setSink,
+    markConnectionLost,
   };
 });

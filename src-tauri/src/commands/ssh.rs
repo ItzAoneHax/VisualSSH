@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::error::{Error, Result};
@@ -71,7 +71,11 @@ fn non_empty(value: &Option<String>) -> Option<String> {
 async fn connect_with_timeout(
     profile: &SshProfileInput,
     known: KnownHosts,
-) -> Result<(SshSession, crate::ssh::HostKeyRecord)> {
+) -> Result<(
+    SshSession,
+    crate::ssh::HostKeyRecord,
+    tokio::sync::mpsc::UnboundedReceiver<()>,
+)> {
     let host = profile.host.trim().to_string();
     if host.is_empty() {
         return Err(Error::Connect {
@@ -96,12 +100,13 @@ async fn connect_with_timeout(
 pub async fn ssh_connect(
     alias: String,
     profile: SshProfileInput,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ConnectResult> {
     let started = Instant::now();
     let mut known = KnownHosts::load()?;
     // 快照交给回调做 TOFU 校验；命令层保留一份用于首次信任后落盘
-    let (session, host_key) = connect_with_timeout(&profile, known.clone()).await?;
+    let (session, host_key, lost_rx) = connect_with_timeout(&profile, known.clone()).await?;
 
     if host_key.first_time {
         // 信任记录落盘失败视为连接失败：没有基线的 TOFU 等于没有防护
@@ -119,6 +124,7 @@ pub async fn ssh_connect(
         .map_err(|_| Error::Timeout)??;
 
     let connection_id = uuid::Uuid::new_v4().to_string();
+    let intentional_close = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     state.insert(
         connection_id.clone(),
         SessionHandle {
@@ -126,8 +132,26 @@ pub async fn ssh_connect(
             host: profile.host.trim().to_string(),
             port: profile.port,
             session: Arc::new(AsyncMutex::new(session)),
+            intentional_close: std::sync::Arc::clone(&intentional_close),
         },
     );
+
+    // 块 D 断线感知：disconnected 回调 → 事件通知前端触发自动重连；
+    // 主动断开（intentional_close 置位）不上报。通道关闭（None）为正常结束。
+    let lost_connection_id = connection_id.clone();
+    let lost_app = app.clone();
+    let lost_flag = std::sync::Arc::clone(&intentional_close);
+    tauri::async_runtime::spawn(async move {
+        let mut lost_rx = lost_rx;
+        let lost = lost_rx.recv().await.is_some()
+            && !lost_flag.load(std::sync::atomic::Ordering::Relaxed);
+        if lost {
+            let _ = lost_app.emit(
+                "ssh://disconnected",
+                serde_json::json!({ "connectionId": lost_connection_id }),
+            );
+        }
+    });
 
     Ok(ConnectResult {
         connection_id,
@@ -147,7 +171,7 @@ pub async fn ssh_test(profile: SshProfileInput) -> Result<TestResult> {
     let latency_ms = started.elapsed().as_millis() as u64;
 
     let session = match outcome {
-        Ok((session, _)) => session,
+        Ok((session, _, _)) => session,
         Err(e) => {
             return Ok(TestResult {
                 ok: false,
@@ -442,12 +466,15 @@ pub async fn ssh_disconnect(
     terminals: State<'_, std::sync::Arc<crate::terminal::TerminalManager>>,
     stats: State<'_, std::sync::Arc<crate::stats::StatsManager>>,
     search: State<'_, Arc<crate::search::SearchManager>>,
+    walks: State<'_, Arc<crate::walk::WalkManager>>,
 ) -> Result<()> {
     transfers.cancel_for_connection(&connection_id);
     terminals.close_for_connection(&connection_id);
     stats.cancel_for_connection(&connection_id);
     search.cancel_for_connection(&connection_id);
+    walks.cancel_for_connection(&connection_id);
     if let Some(handle) = state.remove(&connection_id) {
+        handle.mark_intentional_close();
         let session = handle.session.lock().await;
         session.disconnect().await;
     }

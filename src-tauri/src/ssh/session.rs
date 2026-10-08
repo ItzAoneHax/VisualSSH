@@ -35,12 +35,14 @@ struct CheckRecord {
     fingerprint: String,
 }
 
-/// SSH 客户端事件回调：check_server_key 实现 TOFU（首次信任 + 变更拒绝）。
+/// SSH 客户端事件回调：check_server_key 实现 TOFU（首次信任 + 变更拒绝）；
+/// disconnected 钩子把「服务端断开/连接错误」经通道通知命令层（块 D 断线感知）。
 pub struct ClientHandler {
     host: String,
     port: u16,
     known: KnownHosts,
     check: Arc<Mutex<Option<CheckRecord>>>,
+    lost_tx: tokio::sync::mpsc::UnboundedSender<()>,
 }
 
 impl client::Handler for ClientHandler {
@@ -66,6 +68,18 @@ impl client::Handler for ClientHandler {
         });
         Ok(ok)
     }
+
+    async fn disconnected(
+        &mut self,
+        reason: russh::client::DisconnectReason<Self::Error>,
+    ) -> std::result::Result<(), Self::Error> {
+        // 通道对端可能已被丢弃（会话正常结束路径）：忽略发送失败
+        let _ = self.lost_tx.send(());
+        match reason {
+            russh::client::DisconnectReason::ReceivedDisconnect(_) => Ok(()),
+            russh::client::DisconnectReason::Error(e) => Err(e),
+        }
+    }
 }
 
 /// 连接成功后交给命令层的主机密钥摘要。
@@ -89,13 +103,15 @@ pub struct SshSession {
 }
 
 impl SshSession {
+    /// 返回值第三项：断开信号接收端（disconnected 回调触发；正常/主动断开也会
+    /// 使通道关闭返回 None，由命令层用 intentional_close 标志区分是否上报）。
     pub async fn connect(
         host: &str,
         port: u16,
         username: &str,
         auth: &AuthMethod,
         known: KnownHosts,
-    ) -> Result<(Self, HostKeyRecord)> {
+    ) -> Result<(Self, HostKeyRecord, tokio::sync::mpsc::UnboundedReceiver<()>)> {
         let config = Arc::new(client::Config {
             keepalive_interval: Some(Duration::from_secs(30)),
             keepalive_max: 3,
@@ -104,11 +120,13 @@ impl SshSession {
         });
 
         let check = Arc::new(Mutex::new(None));
+        let (lost_tx, lost_rx) = tokio::sync::mpsc::unbounded_channel();
         let handler = ClientHandler {
             host: host.to_string(),
             port,
             known,
             check: Arc::clone(&check),
+            lost_tx,
         };
 
         let mut handle = client::connect(config, (host, port), handler)
@@ -179,7 +197,7 @@ impl SshSession {
                 fingerprint: String::new(),
             },
         };
-        Ok((Self { handle, sftp }, host_key))
+        Ok((Self { handle, sftp }, host_key, lost_rx))
     }
 
     async fn open_sftp(handle: &Handle<ClientHandler>) -> Result<SftpSession> {

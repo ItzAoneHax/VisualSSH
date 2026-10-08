@@ -153,6 +153,42 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     }
   }
 
+  /** —— 块 D 断线联动 —— */
+
+  /** 断开：受影响标签窗格的 explorer 转断开占位（错误横幅风格） */
+  function markConnectionLost(connectionId: string) {
+    for (const tab of tabs.value) {
+      if (tab.connectionId !== connectionId) continue;
+      for (const pane of tab.panes) {
+        useExplorer(pane.id).error = "连接已断开，正在尝试自动重连…";
+      }
+    }
+  }
+
+  /** 重连成功：explorer 状态未清（cwd 即断开时路径），清占位并静默刷新恢复 */
+  function markConnectionRestored(oldId: string, newId: string) {
+    for (const tab of tabs.value) {
+      if (tab.connectionId !== oldId) continue;
+      for (const pane of tab.panes) {
+        const ex = useExplorer(pane.id);
+        ex.connectionId = newId;
+        ex.error = null;
+        void ex.reloadPreserve();
+      }
+    }
+  }
+
+  /** 重连成功后替换连接标识（byId 键已换，标签与其 explorer 实例同步） */
+  function remapConnection(oldId: string, newId: string) {
+    for (const tab of tabs.value) {
+      if (tab.connectionId !== oldId) continue;
+      tab.connectionId = newId;
+      for (const pane of tab.panes) {
+        useExplorer(pane.id).connectionId = newId;
+      }
+    }
+  }
+
   /** 拖动重排 */
   function moveTab(fromId: string, toIndex: number) {
     const from = tabs.value.findIndex((t) => t.id === fromId);
@@ -266,5 +302,8 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     focusOtherPane,
     resetAll,
     activeExplorer,
+    markConnectionLost,
+    markConnectionRestored,
+    remapConnection,
   };
 });

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::Mutex as AsyncMutex;
@@ -17,6 +18,14 @@ pub struct SessionHandle {
     #[allow(dead_code)]
     pub port: u16,
     pub session: Arc<AsyncMutex<SshSession>>,
+    /// 用户主动断开置位：disconnected 信号不再上报前端（块 D 区分异常断开）
+    pub intentional_close: Arc<AtomicBool>,
+}
+
+impl SessionHandle {
+    pub fn mark_intentional_close(&self) {
+        self.intentional_close.store(true, Ordering::Relaxed);
+    }
 }
 
 /// 全局会话池。外层 Mutex 仅做短暂的 HashMap 存取，
