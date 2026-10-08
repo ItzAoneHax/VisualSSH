@@ -10,6 +10,7 @@ import {
   Download,
   Eye,
   FilePlus,
+  FolderDown,
   FolderOpen,
   FolderPlus,
   FolderSearch,
@@ -38,7 +39,6 @@ import FileTable from "@/components/explorer/FileTable.vue";
 import PropertiesDialog from "@/components/explorer/PropertiesDialog.vue";
 import { useClipboardStore } from "@/stores/clipboard";
 import { useConnectionsStore } from "@/stores/connections";
-import { useConflictStore, type IncomingItem } from "@/stores/conflicts";
 import { useEditorStore } from "@/stores/editor";
 import { useExplorer } from "@/stores/explorer";
 import { usePinnedStore } from "@/stores/pinned";
@@ -54,9 +54,12 @@ import {
   resolveDropMode,
   type FilesDragPayload,
 } from "@/utils/dragDrop";
+import {
+  downloadFolderTo,
+  uploadMixedPaths,
+} from "@/utils/recursiveTransfer";
 import { crossConnectionTransfer, remoteMoveCopy } from "@/utils/remoteOps";
 import { copyVirtualFiles, readClipboardFiles } from "@/api/clipboard";
-import { localFileMeta } from "@/api/transfer";
 
 /**
  * 单个窗格（M7 步骤 2/3）：导航段（后退/前进/上一级/刷新/面包屑）+ 文件区 +
@@ -73,7 +76,6 @@ const workspace = useWorkspaceStore();
 const explorer = useExplorer(props.paneId);
 const editor = useEditorStore();
 const transfers = useTransferStore();
-const conflicts = useConflictStore();
 const clip = useClipboardStore();
 const settings = useSettingsStore();
 const terminalStore = useTerminalStore();
@@ -164,34 +166,6 @@ function showHint(text: string) {
   hintTimer = setTimeout(() => (hint.value = ""), 3000);
 }
 
-/** 上传前冲突解析（Ctrl+V 与拖放共用）：有同名先弹对话框，取消/出错返回 null */
-async function resolveUploadConflicts(
-  localPaths: string[],
-): Promise<{ path: string; finalName: string }[] | null> {
-  const cid = connectionId.value;
-  if (!cid) return null;
-  const metas = await localFileMeta(localPaths).catch(() => []);
-  const incoming: IncomingItem[] = localPaths.map((p, i) => ({
-    name: pathBaseName(p),
-    size: metas[i]?.size ?? null,
-    mtime: metas[i]?.mtime ?? null,
-  }));
-  try {
-    const decisions = await conflicts.resolve(cid, explorer.cwd, incoming);
-    if (!decisions) return null;
-    const out: { path: string; finalName: string }[] = [];
-    for (const d of decisions) {
-      if (d.action !== "proceed") continue;
-      const path = localPaths.find((lp) => pathBaseName(lp) === d.name);
-      if (path) out.push({ path, finalName: d.finalName });
-    }
-    return out;
-  } catch (e) {
-    explorer.error = e instanceof Error ? e.message : String(e);
-    return null;
-  }
-}
-
 /** Ctrl+V：内部剪贴板非空 → 远端粘贴（同连接走 SFTP 直操；跨连接走下载→上传）；
  *  为空回落系统 HDROP 上传 */
 async function pasteFromClipboard(pasteIntoSelection = false) {
@@ -212,10 +186,10 @@ async function pasteFromClipboard(pasteIntoSelection = false) {
     return;
   }
   if (!localPaths.length) return;
-  const resolved = await resolveUploadConflicts(localPaths);
-  if (!resolved) return;
-  for (const item of resolved) {
-    await transfers.startUpload(cid, item.path, explorer.cwd, item.finalName);
+  try {
+    await uploadMixedPaths(cid, localPaths, explorer.cwd);
+  } catch (e) {
+    explorer.error = e instanceof Error ? e.message : String(e);
   }
 }
 
@@ -581,6 +555,8 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
       icon: pinned ? PinOff : Pin,
     });
     items.push({ key: "sep", label: "", separator: true });
+    // 递归下载（第四阶段块 A：清单编排 → 冲突 → 聚合卡）
+    items.push({ key: "downloadFolder", label: "下载文件夹…", icon: FolderDown });
   }
   items.push(
     { key: "cut", label: "剪切", icon: Scissors },
@@ -663,6 +639,12 @@ async function onCtxMenuSelect(key: string) {
     case "copyPath":
       await copyText(joinPath(explorer.cwd, entry.name));
       break;
+    case "downloadFolder": {
+      if (connectionId.value) {
+        void downloadFolderTo(connectionId.value, joinPath(explorer.cwd, entry.name));
+      }
+      break;
+    }
     case "download": {
       // 置灰态双保险（多选含文件夹/链接时不下载）
       const files = downloadTargets(entry);

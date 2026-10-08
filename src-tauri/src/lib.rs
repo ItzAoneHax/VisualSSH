@@ -23,6 +23,7 @@ pub fn run() {
             commands::ssh_test,
             commands::ssh_list_dir,
             commands::ssh_mkdir,
+            commands::ssh_stat,
             commands::ssh_touch,
             commands::ssh_rename,
             commands::ssh_delete,

@@ -174,8 +174,9 @@ export async function crossConnectionTransfer(
       if (!(await transfers.waitAllDone([dl]))) {
         throw new Error("暂存下载失败");
       }
-      // startUpload await 返回即已终态，返回值即成败
-      if (!(await transfers.startUpload(targetCid, local, targetDir, job.finalName))) {
+      // startUpload 返回 id（已注册非终态），waitAllDone 等待真实成败（move 删源前必须确认）
+      const upId = await transfers.startUpload(targetCid, local, targetDir, job.finalName);
+      if (!(await transfers.waitAllDone([upId]))) {
         throw new Error("上传失败");
       }
       done += 1;

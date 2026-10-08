@@ -6,8 +6,11 @@ import {
   Check,
   ChevronDown,
   Copy,
+  FolderDown,
   FolderInput,
+  FolderUp,
   MoreHorizontal,
+  RotateCcw,
   X,
 } from "@lucide/vue";
 import { computed, ref, watch } from "vue";
@@ -24,6 +27,8 @@ import { formatEta, formatSize, formatSpeed } from "@/utils/format";
  * 点击弹出 BottomEdgeAlignedRight 浮层（宽 400，MinHeight 120 / MaxHeight 500）。
  * 面板为 StatusCenter 卡片列表：32px 圆底状态图标 + ⋯ 菜单取消（X 仅清除）+
  * chevron 展开 88px 速度折线 + 头部「清除已完成」。
+ * 递归目录批次 = 一张聚合卡（Files StatusCenterHelper.AddCard_Copy 聚合范式）：
+ * 进度 = 字节加权 + 文件计数双显示「N/M 文件 · X/Y」，子行折叠不单独渲染。
  */
 const transfers = useTransferStore();
 const settings = useSettingsStore();
@@ -55,7 +60,7 @@ const hasFinished = computed(() =>
 /** 全部可测进度传输的平均百分比（Files AverageOperationProgressValue） */
 const averagePercent = computed(() => {
   const measurable = transfers.rows.filter(
-    (r) => r.status === "running" && r.total > 0,
+    (r) => r.status === "running" && r.total > 0 && !r.batchId,
   );
   if (!measurable.length) return 0;
   return (
@@ -81,22 +86,59 @@ function isActive(row: TransferRow): boolean {
   return row.status === "queued" || row.status === "running";
 }
 
+/** 递归目录批次聚合卡 */
+function isFolderOp(row: TransferRow): boolean {
+  return row.direction === "folder-download" || row.direction === "folder-upload";
+}
+
 /** 远端内部复制/移动（前端编排批次，不定进度，无速度折线） */
 function isRemoteOp(row: TransferRow): boolean {
   return row.direction === "remote-copy" || row.direction === "remote-move";
 }
 
-/** 排队与远端批次走不定进度条（Files：总大小未知时 IsIndeterminateProgress） */
+/** 渲染列表：批次子行折叠进聚合卡 */
+const visibleRows = computed(() => transfers.rows.filter((r) => !r.batchId));
+
+/** 聚合卡批次统计（字节加权 + 文件计数，Files StatusCenterItemProgressModel）。
+ *  终态后子行可能被「清除已完成」删除，失败统计回落批次快照 failedItems */
+function batchAgg(row: TransferRow) {
+  const children = transfers.rows.filter((r) => r.batchId === row.id);
+  const bytesDone = children.reduce((s, r) => s + r.bytes, 0);
+  const bytesTotal = children.reduce((s, r) => s + r.total, 0);
+  const filesDone = children.filter((r) => r.status === "done").length;
+  const failed = children.filter((r) => r.status === "failed");
+  const snapshot = row.batch?.failedItems ?? [];
+  return {
+    children,
+    bytesDone,
+    bytesTotal,
+    filesDone,
+    failedCount: failed.length || snapshot.length,
+    failed: failed.length
+      ? failed.map((r) => ({ id: r.id, fileName: r.fileName, error: r.error }))
+      : snapshot.map((s, i) => ({ id: `${row.id}-s${i}`, fileName: s.name, error: s.error })),
+  };
+}
+
+/** 排队 / 枚举清单阶段 / 远端批次走不定进度条 */
 function showIndeterminate(row: TransferRow): boolean {
-  return row.status === "queued" || (isRemoteOp(row) && row.status === "running");
+  if (row.status === "queued") return true;
+  if (isRemoteOp(row) && row.status === "running") return true;
+  return isFolderOp(row) && row.status === "running" && row.batch?.phase === "walking";
 }
 
 function percent(row: TransferRow): number {
+  if (isFolderOp(row)) {
+    const agg = batchAgg(row);
+    const total = agg.bytesTotal || row.batch?.bytesTotal || 0;
+    if (total <= 0) return 0;
+    return Math.min(100, (agg.bytesDone / total) * 100);
+  }
   if (row.total <= 0) return 0;
   return Math.min(100, (row.bytes / row.total) * 100);
 }
 
-/** 状态图标：进行中=方向箭头/远端复制·移动，完成=✓，失败/取消=X（Files StatusCenterItem） */
+/** 状态图标：进行中=方向箭头/远端复制·移动/文件夹上下行，完成=✓，失败/取消=X（Files StatusCenterItem） */
 function stateIcon(row: TransferRow) {
   switch (row.status) {
     case "done":
@@ -105,6 +147,7 @@ function stateIcon(row: TransferRow) {
     case "cancelled":
       return X;
     default:
+      if (isFolderOp(row)) return row.direction === "folder-upload" ? FolderUp : FolderDown;
       if (isRemoteOp(row)) return row.direction === "remote-copy" ? Copy : FolderInput;
       return row.direction === "upload" ? ArrowUp : ArrowDown;
   }
@@ -127,19 +170,49 @@ function stateColor(row: TransferRow): string {
 function terminalCaption(row: TransferRow): string {
   switch (row.status) {
     case "done":
-      return "已完成";
+      if (!isFolderOp(row)) return "已完成";
+      return folderDoneCaption(row);
     case "cancelled":
-      return "已取消";
+      return isFolderOp(row) ? "已取消（已完成文件保留）" : "已取消";
     case "failed":
-      return row.error ?? "失败";
+      return row.batch?.error ?? row.error ?? "失败";
     default:
       return "";
   }
 }
 
+/** 聚合卡完成文案（Files StatusCenter ProcessedItems 语义：N 项 + 失败/跳过） */
+function folderDoneCaption(row: TransferRow): string {
+  const agg = batchAgg(row);
+  const total = row.batch?.filesTotal ?? agg.filesDone;
+  const doneCount = total - agg.failedCount;
+  const parts = [
+    agg.failedCount > 0
+      ? `完成 ${doneCount} 项，失败 ${agg.failedCount} 项`
+      : `完成 ${total} 项`,
+  ];
+  if (row.batch?.skippedLinks) parts.push(`跳过 ${row.batch.skippedLinks} 个链接`);
+  return parts.join(" · ");
+}
+
 /** 收起态进度行下方的统计文案（Files 的 Message 行） */
 function progressCaption(row: TransferRow): string {
   if (row.status === "queued") return "排队中";
+  // 聚合卡：枚举阶段 / 传输阶段双显示（N/M 文件 · X/Y，Files 双指标语义）
+  if (isFolderOp(row) && row.batch) {
+    if (row.batch.phase === "walking") {
+      return row.batch.discovered > 0
+        ? `正在枚举文件…（已发现 ${row.batch.discovered} 项）`
+        : "正在枚举文件…";
+    }
+    const agg = batchAgg(row);
+    const speed = formatSpeed(row.speedBps);
+    const bytes =
+      agg.bytesTotal > 0
+        ? `${formatSize(agg.bytesDone)} / ${formatSize(agg.bytesTotal)}`
+        : formatSize(agg.bytesDone);
+    return `${agg.filesDone}/${row.batch.filesTotal} 文件 · ${bytes} · ${speed}`;
+  }
   const eta = formatEta(row.total - row.bytes, row.speedBps);
   const speed = formatSpeed(row.speedBps);
   if (row.total <= 0) return speed;
@@ -184,7 +257,8 @@ function onCancelMenuSelect(key: string) {
   cancelMenu.value = null;
   if (!target || key !== "cancel") return;
   const row = transfers.rows.find((r) => r.id === target.id);
-  if (row && isRemoteOp(row)) transfers.cancelRemoteOp(target.id);
+  if (row && isFolderOp(row)) transfers.cancelBatch(target.id);
+  else if (row && isRemoteOp(row)) transfers.cancelRemoteOp(target.id);
   else transfers.cancel(target.id);
 }
 </script>
@@ -275,10 +349,10 @@ function onCancelMenuSelect(key: string) {
             <span class="text-xs">没有进行中的传输</span>
           </div>
 
-          <!-- 条目卡片（RepositionThemeTransition → card-list-move） -->
+          <!-- 条目卡片（RepositionThemeTransition → card-list-move）；批次子行折叠进聚合卡 -->
           <TransitionGroup name="card-list" tag="div">
             <div
-              v-for="row in transfers.rows"
+              v-for="row in visibleRows"
               :key="row.id"
               class="mb-1.5 rounded-lg p-2 last:mb-0"
               :style="{
@@ -323,7 +397,7 @@ function onCancelMenuSelect(key: string) {
                     >
                       <MoreHorizontal :size="16" />
                     </button>
-                    <!-- 展开速度折线（仅真实传输运行中有速度数据；远端批次无速度概念） -->
+                    <!-- 展开速度折线/失败清单（真实传输与聚合卡可展开；远端批次无详情） -->
                     <button
                       v-if="row.status === 'running' && !isRemoteOp(row)"
                       type="button"
@@ -339,6 +413,20 @@ function onCancelMenuSelect(key: string) {
                       />
                     </button>
                   </template>
+                  <!-- 终态聚合卡：有失败/跳过项时展开查看详情与重试 -->
+                  <button
+                    v-else-if="isFolderOp(row) && (batchAgg(row).failedCount > 0 || (row.batch?.skippedLinks ?? 0) > 0)"
+                    type="button"
+                    class="btn-icon h-8 w-8"
+                    :title="isExpanded(row.id) ? '收起' : '查看详情'"
+                    @click="toggleExpand(row.id)"
+                  >
+                    <ChevronDown
+                      :size="16"
+                      class="transition-transform"
+                      :class="isExpanded(row.id) && 'rotate-180'"
+                    />
+                  </button>
                   <button
                     v-else
                     type="button"
@@ -452,10 +540,47 @@ function onCancelMenuSelect(key: string) {
                       </span>
                     </div>
                     <p class="mt-1 truncate text-xs text-dim">
-                      {{ formatSize(row.bytes) }} / {{ formatSize(row.total) }}
+                      <template v-if="isFolderOp(row)">
+                        {{ batchAgg(row).filesDone }}/{{ row.batch?.filesTotal ?? 0 }} 文件 ·
+                        {{ formatSize(batchAgg(row).bytesDone) }} /
+                        {{ formatSize(batchAgg(row).bytesTotal || row.batch?.bytesTotal || 0) }}
+                      </template>
+                      <template v-else>{{ formatSize(row.bytes) }} / {{ formatSize(row.total) }}</template>
                     </p>
                   </div>
                 </template>
+              </div>
+
+              <!-- 终态聚合卡详情：失败清单 + 重试失败项 -->
+              <div
+                v-if="!isActive(row) && isFolderOp(row) && isExpanded(row.id)"
+                class="mt-2 flex flex-col gap-1 pl-11"
+              >
+                <p
+                  v-if="batchAgg(row).failedCount"
+                  class="text-xs font-medium"
+                  :style="{ color: 'var(--danger)' }"
+                >
+                  失败 {{ batchAgg(row).failedCount }} 项
+                </p>
+                <div
+                  v-for="f in batchAgg(row).failed"
+                  :key="f.id"
+                  class="truncate text-xs"
+                  :style="{ color: 'var(--danger)' }"
+                  :title="f.error"
+                >
+                  {{ f.fileName }} — {{ f.error ?? "失败" }}
+                </div>
+                <button
+                  v-if="transfers.hasBatchRetry(row.id)"
+                  type="button"
+                  class="btn-secondary mt-1 inline-flex h-7 items-center gap-1.5 self-start px-2.5 text-xs"
+                  @click="transfers.retryBatch(row.id)"
+                >
+                  <RotateCcw :size="13" />
+                  重试失败项
+                </button>
               </div>
             </div>
           </TransitionGroup>

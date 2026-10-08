@@ -35,6 +35,16 @@ export function mkdirSsh(connectionId: string, path: string): Promise<void> {
   return invoke("ssh_mkdir", { connectionId, path });
 }
 
+/** 单路径属性（递归传输用：mkdir 报错时判定「已存在目录」当成功） */
+export interface SshStat {
+  kind: FileEntry["kind"];
+  size: number;
+}
+
+export function statSsh(connectionId: string, path: string): Promise<SshStat> {
+  return invoke("ssh_stat", { connectionId, path });
+}
+
 export function touchSsh(connectionId: string, path: string): Promise<void> {
   return invoke("ssh_touch", { connectionId, path });
 }

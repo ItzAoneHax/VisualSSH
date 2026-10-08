@@ -39,6 +39,8 @@ export function removeTransfer(transferId: string): Promise<boolean> {
 export interface LocalFileMeta {
   size: number;
   mtime: number | null;
+  /** 递归传输冲突探测用：目录命中按「合并」处理而非文件替换 */
+  isDir?: boolean;
 }
 
 export function localFileMeta(paths: string[]): Promise<(LocalFileMeta | null)[]> {

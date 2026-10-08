@@ -209,6 +209,33 @@ pub async fn ssh_mkdir(
         .map_err(|_| Error::Timeout)?
 }
 
+/// 单路径属性（kind + 大小）。递归传输用：mkdir 报错时判定「已存在目录」当成功。
+#[derive(Serialize)]
+pub struct SshStat {
+    pub kind: &'static str,
+    pub size: u64,
+}
+
+#[tauri::command]
+pub async fn ssh_stat(
+    connection_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<SshStat> {
+    use crate::ssh::kind_from_mode;
+    let handle = state
+        .get(&connection_id)
+        .ok_or_else(|| Error::NoSession(connection_id.clone()))?;
+    let session = handle.session.lock().await;
+    let attrs = tokio::time::timeout(IO_TIMEOUT, session.stat(&path))
+        .await
+        .map_err(|_| Error::Timeout)??;
+    Ok(SshStat {
+        kind: kind_from_mode(attrs.permissions),
+        size: attrs.size.unwrap_or(0),
+    })
+}
+
 #[tauri::command]
 pub async fn ssh_touch(
     connection_id: String,

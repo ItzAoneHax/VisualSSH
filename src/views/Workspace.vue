@@ -27,12 +27,10 @@ import TerminalPanel from "@/components/workspace/TerminalPanel.vue";
 import TransferCenter from "@/components/workspace/TransferCenter.vue";
 import { useConnectionsStore } from "@/stores/connections";
 import { useClipboardStore } from "@/stores/clipboard";
-import { useConflictStore } from "@/stores/conflicts";
 import { useExplorer } from "@/stores/explorer";
 import { usePinnedStore } from "@/stores/pinned";
 import { useSettingsStore } from "@/stores/settings";
 import { useTerminalStore } from "@/stores/terminal";
-import { useTransferStore } from "@/stores/transfer";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { formatSize, pathBaseName } from "@/utils/format";
 import {
@@ -44,8 +42,8 @@ import {
   type FilesDragPayload,
 } from "@/utils/dragDrop";
 import { crossConnectionTransfer, remoteMoveCopy } from "@/utils/remoteOps";
+import { uploadMixedPaths } from "@/utils/recursiveTransfer";
 import { fsInfo, type FsInfo } from "@/api/ssh";
-import { localFileMeta } from "@/api/transfer";
 
 /**
  * 工作区（M7）：标签条 + 侧栏 + 活动窗格（ExplorerPane）+ 全局工具按钮 + 状态栏。
@@ -156,10 +154,11 @@ onMounted(() => {
         } else if (payload.type === "drop") {
           dragOver.value = false;
           if (!cid || !ex) return;
-          const resolved = await resolveUploadConflicts(payload.paths);
-          if (!resolved) return;
-          for (const item of resolved) {
-            void transfers.startUpload(cid, item.path, ex.cwd, item.finalName);
+          // 目录走递归上传（聚合卡编排），文件走冲突对话框 + 逐个上传
+          try {
+            await uploadMixedPaths(cid, payload.paths, ex.cwd);
+          } catch (e) {
+            ex.error = e instanceof Error ? e.message : String(e);
           }
         }
       })
@@ -188,9 +187,6 @@ watch(
     if (ex.connectionId) void ex.reloadPreserve();
   },
 );
-
-/** —— 全局工具按钮（ExplorerPane #actions 插槽）—— */
-const transfers = useTransferStore();
 
 /** 打开终端（活动窗格连接 + 当前目录启动 shell；该连接已有会话则直接展示） */
 function onOpenTerminal() {
@@ -434,36 +430,6 @@ async function executePaneMoveCopy(
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     if (message !== "cancelled") ex.error = message;
-  }
-}
-
-/** 上传冲突解析（拖放共用）：有同名先弹对话框，取消/出错返回 null */
-async function resolveUploadConflicts(
-  localPaths: string[],
-): Promise<{ path: string; finalName: string }[] | null> {
-  const cid = activeConn.value?.connectionId;
-  const ex = activeExplorer.value;
-  if (!cid || !ex) return null;
-  const conflicts = useConflictStore();
-  const metas = await localFileMeta(localPaths).catch(() => []);
-  const incoming = localPaths.map((p, i) => ({
-    name: pathBaseName(p),
-    size: metas[i]?.size ?? null,
-    mtime: metas[i]?.mtime ?? null,
-  }));
-  try {
-    const decisions = await conflicts.resolve(cid, ex.cwd, incoming);
-    if (!decisions) return null;
-    const out: { path: string; finalName: string }[] = [];
-    for (const d of decisions) {
-      if (d.action !== "proceed") continue;
-      const path = localPaths.find((lp) => pathBaseName(lp) === d.name);
-      if (path) out.push({ path, finalName: d.finalName });
-    }
-    return out;
-  } catch (e) {
-    ex.error = e instanceof Error ? e.message : String(e);
-    return null;
   }
 }
 

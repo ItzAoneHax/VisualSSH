@@ -30,6 +30,10 @@ const AGGREGATE_OPTIONS = [
 const title = computed(() => {
   const s = conflicts.session;
   if (!s) return "";
+  if (s.multi) {
+    const dirs = new Set(s.rows.map((r) => r.targetDir)).size;
+    return `${s.rows.length} 个项目已存在于 ${dirs} 个目录`;
+  }
   return `${s.rows.length} 个项目已存在于 ${pathBaseName(s.targetDir)}`;
 });
 
@@ -81,7 +85,7 @@ function newNameInvalid(row: ConflictRow): boolean {
       <div class="-mx-1 max-h-80 overflow-y-auto px-1">
         <div
           v-for="row in conflicts.rows"
-          :key="row.name"
+          :key="conflicts.rowKey(row)"
           class="grid grid-cols-[minmax(0,1fr)_9.5rem] items-start gap-x-3 rounded-[4px] px-1 py-2 hover:bg-fill-subtle"
         >
           <div class="flex min-w-0 items-start gap-2.5">
@@ -115,6 +119,14 @@ function newNameInvalid(row: ConflictRow): boolean {
               </p>
               <p class="truncate text-xs text-dim">
                 传入 {{ metaText(row, "incoming") }}
+              </p>
+              <!-- 多目录批次（递归传输）：行内标注所属目标目录 -->
+              <p
+                v-if="conflicts.session?.multi"
+                class="truncate text-xs text-faint"
+                :title="row.targetDir"
+              >
+                位于 {{ row.targetDir }}
               </p>
             </div>
           </div>

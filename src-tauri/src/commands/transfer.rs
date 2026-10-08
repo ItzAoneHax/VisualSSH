@@ -16,6 +16,8 @@ use crate::transfer::{
 pub struct LocalFileMeta {
     pub size: u64,
     pub mtime: Option<i64>,
+    /// 递归传输冲突探测用：目录命中的条目按「合并」处理而非文件替换
+    pub is_dir: bool,
 }
 
 /// 逐个读取本地文件元数据；读不到的槽位为 null（前端显示 —）。
@@ -30,6 +32,7 @@ pub async fn local_file_meta(paths: Vec<String>) -> Result<Vec<Option<LocalFileM
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs() as i64),
+            is_dir: m.is_dir(),
         }));
     }
     Ok(out)
