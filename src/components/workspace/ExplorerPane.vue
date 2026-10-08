@@ -54,7 +54,7 @@ import {
   resolveDropMode,
   type FilesDragPayload,
 } from "@/utils/dragDrop";
-import { remoteMoveCopy } from "@/utils/remoteOps";
+import { crossConnectionTransfer, remoteMoveCopy } from "@/utils/remoteOps";
 import { copyVirtualFiles, readClipboardFiles } from "@/api/clipboard";
 import { localFileMeta } from "@/api/transfer";
 
@@ -192,17 +192,18 @@ async function resolveUploadConflicts(
   }
 }
 
-/** Ctrl+V：内部剪贴板非空 → 远端粘贴（内部优先）；为空回落系统 HDROP 上传 */
+/** Ctrl+V：内部剪贴板非空 → 远端粘贴（同连接走 SFTP 直操；跨连接走下载→上传）；
+ *  为空回落系统 HDROP 上传 */
 async function pasteFromClipboard(pasteIntoSelection = false) {
   const cid = connectionId.value;
   if (!cid) return;
   if (clip.clip && clip.clip.names.length) {
     if (clip.clip.connectionId !== cid) {
-      clip.clear();
-    } else {
-      await pasteRemote(cid, pasteIntoSelection);
+      await pasteCrossConnection(cid);
       return;
     }
+    await pasteRemote(cid, pasteIntoSelection);
+    return;
   }
   let localPaths: string[];
   try {
@@ -215,6 +216,37 @@ async function pasteFromClipboard(pasteIntoSelection = false) {
   if (!resolved) return;
   for (const item of resolved) {
     await transfers.startUpload(cid, item.path, explorer.cwd, item.finalName);
+  }
+}
+
+/** 跨连接粘贴（Ctrl+C 于连接 A → Ctrl+V 于连接 B）。cut = move（复制后删源，全部成功才清剪贴板） */
+async function pasteCrossConnection(targetCid: string) {
+  const c = clip.clip;
+  if (!c || !c.names.length) return;
+  try {
+    const result = await crossConnectionTransfer(
+      c.connectionId,
+      c.sourceDir,
+      c.names,
+      c.mode === "cut" ? "move" : "copy",
+      targetCid,
+      explorer.cwd,
+    );
+    if (result.skippedFolders > 0) {
+      showHint(`跨连接粘贴暂不支持文件夹（已跳过 ${result.skippedFolders} 项）`);
+    }
+    if (c.mode === "cut" && !result.failed.length) {
+      clip.clear();
+    }
+    await explorer.reloadPreserve();
+    if (result.failed.length) {
+      explorer.error = `跨连接${c.mode === "cut" ? "移动" : "复制"}未全部完成 — ${result.failed.join("；")}`;
+    } else {
+      showHint(`已跨连接${c.mode === "cut" ? "移动" : "复制"} ${result.done} 项`);
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message !== "cancelled") explorer.error = message;
   }
 }
 
@@ -254,17 +286,39 @@ async function pasteRemote(cid: string, pasteIntoSelection: boolean) {
   }
 }
 
-/** —— 行内拖拽落点（M7 步骤 4）：文件区空白 / 文件夹行 / 面包屑分段 → 移动/复制 —— */
+/** —— 行内拖拽落点（M7 步骤 4）：文件区空白 / 文件夹行 / 面包屑分段 → 移动/复制；
+ *  跨连接文件自动走「暂存下载→上传」管线（文件夹跳过并提示） —— */
 async function onFilesDropped(payload: FilesDragPayload, targetDir: string, ctrlKey: boolean) {
+  const mode = resolveDropMode(ctrlKey);
   if (isCrossConnection(payload, connectionId.value)) {
-    showHint("暂不支持跨连接拖拽");
+    try {
+      const result = await crossConnectionTransfer(
+        payload.connectionId,
+        payload.dir,
+        payload.names,
+        mode,
+        connectionId.value,
+        targetDir,
+      );
+      if (result.skippedFolders > 0) {
+        showHint(`跨连接拖拽暂不支持文件夹（已跳过 ${result.skippedFolders} 项）`);
+      }
+      if (result.failed.length) {
+        explorer.error = `跨连接${mode === "move" ? "移动" : "复制"}未全部完成 — ${result.failed.join("；")}`;
+      } else {
+        showHint(`已跨连接${mode === "move" ? "移动" : "复制"} ${result.done} 项`);
+      }
+      if (targetDir === explorer.cwd) await explorer.reloadPreserve();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (message !== "cancelled") explorer.error = message;
+    }
     return;
   }
   if (isSameDir(payload, targetDir)) {
     showHint("源目录与目标目录相同");
     return;
   }
-  const mode = resolveDropMode(ctrlKey);
   try {
     const result = await remoteMoveCopy(
       connectionId.value,
@@ -464,6 +518,14 @@ function searchHitFullPath(entry: FileEntry): string {
   return session ? joinPath(session.dir, rel) : joinPath(explorer.cwd, entry.name);
 }
 
+/** 在新标签页中打开目录（本窗格标签的连接；Files 文件夹右键 Open in new tab） */
+function openTabAt(path: string) {
+  const tab = workspace.tabs.find((t) => t.id === props.tabId);
+  if (!tab) return;
+  const newTab = workspace.openTab(tab.connectionId, tab.profileId, tab.alias);
+  workspace.initPane(newTab.activePaneId, tab.connectionId, path, tab.profileId, path);
+}
+
 const ctxMenuItems = computed<MenuItem[]>(() => {
   const entry = ctxMenu.value.entry;
   // 递归搜索结果视图：操作依赖完整路径而非当前目录条目，仅保留三项
@@ -508,6 +570,7 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
   const items: MenuItem[] = [];
   if (entry.kind === "dir") {
     items.push({ key: "open", label: "打开", icon: FolderOpen });
+    items.push({ key: "openInNewTab", label: "在新标签页中打开", icon: FolderOpen });
     // 固定到侧栏（PinFolderToSidebarAction；已固定显示取消固定）
     const folderPath = joinPath(explorer.cwd, entry.name);
     const pid = profileId.value;
@@ -573,6 +636,9 @@ async function onCtxMenuSelect(key: string) {
   switch (key) {
     case "open":
       explorer.enter(entry.name);
+      break;
+    case "openInNewTab":
+      openTabAt(joinPath(explorer.cwd, entry.name));
       break;
     case "pin": {
       const pid = profileId.value;

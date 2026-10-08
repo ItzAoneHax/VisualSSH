@@ -43,7 +43,7 @@ import {
   resolveDropMode,
   type FilesDragPayload,
 } from "@/utils/dragDrop";
-import { remoteMoveCopy } from "@/utils/remoteOps";
+import { crossConnectionTransfer, remoteMoveCopy } from "@/utils/remoteOps";
 import { fsInfo, type FsInfo } from "@/api/ssh";
 import { localFileMeta } from "@/api/transfer";
 
@@ -330,6 +330,7 @@ function onPinContextMenu(folder: { path: string }, e: MouseEvent) {
 
 const pinMenuItems = computed<MenuItem[]>(() => [
   { key: "open", label: "打开", icon: FolderOpen },
+  { key: "openInNewTab", label: "在新标签页中打开", icon: FolderOpen },
   { key: "sepP", label: "", separator: true },
   { key: "unpin", label: "取消固定", icon: PinOff },
 ]);
@@ -340,7 +341,10 @@ function onPinMenuSelect(key: string) {
   if (!menu) return;
   const pid = activeTab.value?.profileId;
   if (key === "open") activeExplorer.value?.open(menu.path);
-  else if (key === "unpin" && pid) pinnedStore.unpin(pid, menu.path);
+  else if (key === "openInNewTab") {
+    const conn = activeConn.value;
+    if (conn) openTabForConnection(conn, menu.path);
+  } else if (key === "unpin" && pid) pinnedStore.unpin(pid, menu.path);
 }
 
 /** —— 行内拖拽落点（M7 步骤 4，Files SidebarViewModel.cs HandleLocationItemDroppedAsync）：
@@ -393,7 +397,7 @@ function onPinBlankDrop(e: DragEvent) {
   }
 }
 
-/** 活动窗格连接上的移动/复制执行（侧栏落点；结果横幅写窗格 error/hint 不可达——用 error 承载失败） */
+/** 侧栏拖放落点执行（结果横幅写窗格 error；轻提示无 hint 通道，失败走 error） */
 async function executePaneMoveCopy(
   payload: FilesDragPayload,
   targetDir: string,
@@ -401,13 +405,26 @@ async function executePaneMoveCopy(
   ex: { error: string | null; reloadPreserve: () => Promise<void>; cwd: string },
   cid: string,
 ) {
-  if (isCrossConnection(payload, cid)) {
-    ex.error = "暂不支持跨连接拖拽";
-    return;
-  }
-  if (isSameDir(payload, targetDir)) return;
   const mode = resolveDropMode(ctrlKey);
   try {
+    if (isCrossConnection(payload, cid)) {
+      const result = await crossConnectionTransfer(
+        payload.connectionId,
+        payload.dir,
+        payload.names,
+        mode,
+        cid,
+        targetDir,
+      );
+      if (result.skippedFolders > 0) {
+        ex.error = `跨连接拖拽暂不支持文件夹（已跳过 ${result.skippedFolders} 项）`;
+      } else if (result.failed.length) {
+        ex.error = `跨连接${mode === "move" ? "移动" : "复制"}未全部完成 — ${result.failed.join("；")}`;
+      }
+      if (targetDir === ex.cwd) await ex.reloadPreserve();
+      return;
+    }
+    if (isSameDir(payload, targetDir)) return;
     const result = await remoteMoveCopy(cid, payload.dir, payload.names, targetDir, mode);
     if (result.cancelled) return;
     if (result.failed.length) {

@@ -15,7 +15,7 @@ import {
   readFilesPayload,
   resolveDropMode,
 } from "@/utils/dragDrop";
-import { remoteMoveCopy } from "@/utils/remoteOps";
+import { crossConnectionTransfer, remoteMoveCopy } from "@/utils/remoteOps";
 
 /**
  * 标签条（M7 步骤 2，对照 Files UserControls/TabBar）：
@@ -118,13 +118,27 @@ async function onTabFileDrop(tab: WorkspaceTab, e: DragEvent) {
   const payload = readFilesPayload(e.dataTransfer!);
   if (!payload) return;
   const target = useExplorer(tab.activePaneId);
-  if (isCrossConnection(payload, tab.connectionId)) {
-    target.error = "暂不支持跨连接拖拽";
-    return;
-  }
-  if (isSameDir(payload, target.cwd)) return;
   const mode = resolveDropMode(e.ctrlKey);
   try {
+    if (isCrossConnection(payload, tab.connectionId)) {
+      // 跨连接：文件走「暂存下载→上传」管线（文件夹跳过，横幅提示）
+      const result = await crossConnectionTransfer(
+        payload.connectionId,
+        payload.dir,
+        payload.names,
+        mode,
+        tab.connectionId,
+        target.cwd,
+      );
+      if (result.skippedFolders > 0) {
+        target.error = `跨连接拖拽暂不支持文件夹（已跳过 ${result.skippedFolders} 项）`;
+      } else if (result.failed.length) {
+        target.error = `跨连接${mode === "move" ? "移动" : "复制"}未全部完成 — ${result.failed.join("；")}`;
+      }
+      await target.reloadPreserve();
+      return;
+    }
+    if (isSameDir(payload, target.cwd)) return;
     const result = await remoteMoveCopy(
       tab.connectionId,
       payload.dir,

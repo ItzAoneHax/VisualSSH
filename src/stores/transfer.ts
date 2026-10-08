@@ -120,13 +120,14 @@ export const useTransferStore = defineStore("transfer", () => {
     );
   }
 
+  /** 上传（await 返回即已终态）；成功 true / 失败 false（失败详情见卡片，跨连接编排需要结果） */
   async function startUpload(
     connectionId: string,
     localPath: string,
     remoteDir: string,
     /** 冲突改名后的远端名；缺省用本地文件名 */
     remoteName?: string,
-  ) {
+  ): Promise<boolean> {
     const id = crypto.randomUUID();
     const fileName = remoteName ?? localBaseName(localPath);
     rows.value.unshift({
@@ -141,6 +142,7 @@ export const useTransferStore = defineStore("transfer", () => {
     });
     try {
       await uploadTransfer(id, connectionId, localPath, joinPath(remoteDir, fileName));
+      return true;
     } catch (e) {
       applyEvent({
         transferId: id,
@@ -152,6 +154,7 @@ export const useTransferStore = defineStore("transfer", () => {
         status: "failed",
         error: e instanceof Error ? e.message : String(e),
       });
+      return false;
     }
   }
 

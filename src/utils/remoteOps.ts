@@ -5,7 +5,7 @@ import { useConflictStore } from "@/stores/conflicts";
 import { useTransferStore } from "@/stores/transfer";
 import type { FileEntry } from "@/types";
 import { joinPath } from "@/utils/format";
-import { execSsh, listDir, renameSsh, type ExecOutput } from "@/api/ssh";
+import { deleteSsh, execSsh, listDir, renameSsh, type ExecOutput } from "@/api/ssh";
 
 /**
  * 远端移动/复制执行管线（M7 步骤 4）：内部剪贴板粘贴（pasteRemote）与行内拖拽共用。
@@ -127,4 +127,69 @@ async function fallbackCopyViaTemp(
   const ok = await transfers.waitAllDone([transferId]);
   if (!ok) throw new Error(`暂存下载失败（${name}）`);
   await transfers.startUpload(connectionId, local, targetDir, name);
+}
+
+/** 跨连接传输（Ctrl+C/V 与拖拽共用）：文件逐个「暂存下载 → 上传」（传输中心显示进度）；
+ *  文件夹需递归下载、超出当前传输能力，跳过。move = 复制确认后删源文件。
+ *  冲突解析取消时 throw Error("cancelled")，调用方静默。 */
+export async function crossConnectionTransfer(
+  sourceCid: string,
+  sourceDir: string,
+  names: string[],
+  mode: "copy" | "move",
+  targetCid: string,
+  targetDir: string,
+): Promise<{ done: number; skippedFolders: number; failed: string[] }> {
+  const conflicts = useConflictStore();
+  const transfers = useTransferStore();
+
+  let sourceEntries: FileEntry[];
+  try {
+    sourceEntries = await listDir(sourceCid, sourceDir);
+  } catch (e) {
+    throw new Error(e instanceof Error ? e.message : String(e));
+  }
+  const byName = new Map(sourceEntries.map((e) => [e.name, e]));
+  const present = names.filter((n) => byName.has(n));
+  const files = present.filter((n) => byName.get(n)!.kind === "file");
+  const skippedFolders = present.length - files.length;
+  if (!files.length) return { done: 0, skippedFolders, failed: [] };
+
+  const incoming: IncomingItem[] = files.map((n) => {
+    const e = byName.get(n)!;
+    return { name: e.name, size: e.size, mtime: e.mtime };
+  });
+  const decisions = await conflicts.resolve(targetCid, targetDir, incoming);
+  if (!decisions) throw new Error("cancelled");
+  const jobs = decisions.filter((d) => d.action === "proceed");
+  if (!jobs.length) return { done: 0, skippedFolders, failed: [] };
+
+  const base = (await tempDir()).replace(/[\\/]+$/, "");
+  const failed: string[] = [];
+  let done = 0;
+  for (const job of jobs) {
+    const local = `${base}/VisualSSH/${crypto.randomUUID()}-${job.finalName}`;
+    try {
+      const dl = await transfers.startDownloadTo(sourceCid, joinPath(sourceDir, job.name), local);
+      if (!(await transfers.waitAllDone([dl]))) {
+        throw new Error("暂存下载失败");
+      }
+      // startUpload await 返回即已终态，返回值即成败
+      if (!(await transfers.startUpload(targetCid, local, targetDir, job.finalName))) {
+        throw new Error("上传失败");
+      }
+      done += 1;
+      if (mode === "move") {
+        try {
+          await deleteSsh(sourceCid, joinPath(sourceDir, job.name), false);
+        } catch {
+          // 删源失败不回滚已复制的文件，计入 failed 提示
+          failed.push(`${job.name}: 源文件删除失败`);
+        }
+      }
+    } catch (e) {
+      failed.push(`${job.name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return { done, skippedFolders, failed };
 }
