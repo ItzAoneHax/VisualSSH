@@ -6,6 +6,7 @@ import {
   Check,
   ChevronDown,
   Copy,
+  FileArchive,
   FolderDown,
   FolderInput,
   FolderUp,
@@ -96,6 +97,11 @@ function isRemoteOp(row: TransferRow): boolean {
   return row.direction === "remote-copy" || row.direction === "remote-move";
 }
 
+/** 压缩/解压 exec 卡（不定进度，取消 = 杀远端通道） */
+function isArchiveOp(row: TransferRow): boolean {
+  return row.direction === "archive";
+}
+
 /** 渲染列表：批次子行折叠进聚合卡 */
 const visibleRows = computed(() => transfers.rows.filter((r) => !r.batchId));
 
@@ -124,6 +130,7 @@ function batchAgg(row: TransferRow) {
 function showIndeterminate(row: TransferRow): boolean {
   if (row.status === "queued") return true;
   if (isRemoteOp(row) && row.status === "running") return true;
+  if (isArchiveOp(row) && row.status === "running") return true;
   return isFolderOp(row) && row.status === "running" && row.batch?.phase === "walking";
 }
 
@@ -149,6 +156,7 @@ function stateIcon(row: TransferRow) {
     default:
       if (isFolderOp(row)) return row.direction === "folder-upload" ? FolderUp : FolderDown;
       if (isRemoteOp(row)) return row.direction === "remote-copy" ? Copy : FolderInput;
+      if (isArchiveOp(row)) return FileArchive;
       return row.direction === "upload" ? ArrowUp : ArrowDown;
   }
 }
@@ -259,6 +267,7 @@ function onCancelMenuSelect(key: string) {
   const row = transfers.rows.find((r) => r.id === target.id);
   if (row && isFolderOp(row)) transfers.cancelBatch(target.id);
   else if (row && isRemoteOp(row)) transfers.cancelRemoteOp(target.id);
+  else if (row && isArchiveOp(row)) transfers.cancelArchiveOp(target.id);
   else transfers.cancel(target.id);
 }
 </script>
@@ -397,9 +406,9 @@ function onCancelMenuSelect(key: string) {
                     >
                       <MoreHorizontal :size="16" />
                     </button>
-                    <!-- 展开速度折线/失败清单（真实传输与聚合卡可展开；远端批次无详情） -->
+                    <!-- 展开速度折线/失败清单（真实传输与聚合卡可展开；远端批次/exec 卡无详情） -->
                     <button
-                      v-if="row.status === 'running' && !isRemoteOp(row)"
+                      v-if="row.status === 'running' && !isRemoteOp(row) && !isArchiveOp(row)"
                       type="button"
                       class="btn-icon h-8 w-8"
                       :title="isExpanded(row.id) ? '收起' : '速度图表'"

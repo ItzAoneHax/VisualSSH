@@ -17,7 +17,8 @@ export type TransferDirection =
   | "remote-copy"
   | "remote-move"
   | "folder-download"
-  | "folder-upload";
+  | "folder-upload"
+  | "archive";
 
 /** 聚合卡批次状态（编排层驱动；进度统计由子行实时聚合，见 TransferCenter） */
 export interface FolderBatchState {
@@ -97,6 +98,14 @@ export interface RemoteOpHandle {
   isCancelled: () => boolean;
   setDone: () => void;
   setFailed: (error: string) => void;
+}
+
+/** 压缩/解压 exec 卡句柄：终态转轨由编排层在 archive://done 事件回调里调（终态后不可再改） */
+export interface ArchiveOpHandle {
+  id: string;
+  setDone: (doneTitle: string) => void;
+  setFailed: (error: string) => void;
+  setCancelled: () => void;
 }
 
 /** 远端批次取消函数登记（取消即停止批次剩余项） */
@@ -406,6 +415,65 @@ export const useTransferStore = defineStore("transfer", () => {
     }
   }
 
+  /** —— 压缩/解压 exec 卡（第五阶段块 C，不定进度同远端批次卡）—— */
+
+  /** 取消闭包登记（取消 = ssh_archive_cancel 杀远端通道） */
+  const archiveCancels = new Map<string, () => void>();
+
+  /** 创建不定进度 exec 卡（压缩/解压共用） */
+  function startArchiveOp(runningTitle: string): ArchiveOpHandle {
+    const id = crypto.randomUUID();
+    rows.value.unshift({
+      id,
+      direction: "archive",
+      fileName: runningTitle,
+      bytes: 0,
+      total: 0,
+      speedBps: 0,
+      status: "running",
+      speedHistory: [],
+    });
+    const rowOf = () => rows.value.find((r) => r.id === id);
+    const terminal = () => {
+      const status = rowOf()?.status;
+      return status === "done" || status === "failed" || status === "cancelled";
+    };
+    return {
+      id,
+      setDone: (doneTitle: string) => {
+        const row = rowOf();
+        if (row && !terminal()) {
+          row.status = "done";
+          row.fileName = doneTitle;
+        }
+      },
+      setFailed: (error: string) => {
+        const row = rowOf();
+        if (row && !terminal()) {
+          row.status = "failed";
+          row.error = error;
+        }
+      },
+      setCancelled: () => {
+        const row = rowOf();
+        if (row && !terminal()) row.status = "cancelled";
+      },
+    };
+  }
+
+  /** 编排层登记取消闭包（卡片 ⋯ 菜单 → cancelArchiveOp） */
+  function registerArchiveCancel(id: string, cancel: () => void) {
+    archiveCancels.set(id, cancel);
+  }
+
+  /** 取消 exec 卡：杀远端通道；行转已取消（done 事件迟到时终态保护跳过） */
+  function cancelArchiveOp(id: string) {
+    archiveCancels.get(id)?.();
+    archiveCancels.delete(id);
+    const row = rows.value.find((r) => r.id === id);
+    if (row && row.status === "running") row.status = "cancelled";
+  }
+
   /** —— 递归目录批次聚合卡（Files StatusCenterHelper.AddCard_Copy 聚合范式）—— */
 
   /** 创建聚合卡（phase=walking：枚举清单中）；返回批次 id（即卡行 id） */
@@ -481,6 +549,8 @@ export const useTransferStore = defineStore("transfer", () => {
     void connectionId;
     for (const handle of batchHandles.values()) handle.cancel();
     batchHandles.clear();
+    // exec 卡随会话消亡：登记的取消闭包已无意义，直接清（行在下方循环统一标失败）
+    archiveCancels.clear();
     for (const row of rows.value) {
       if (row.status !== "queued" && row.status !== "running") continue;
       if (row.batchId || !row.batch) {
@@ -532,6 +602,9 @@ export const useTransferStore = defineStore("transfer", () => {
     startDownloadTo,
     startRemoteOp,
     cancelRemoteOp,
+    startArchiveOp,
+    registerArchiveCancel,
+    cancelArchiveOp,
     startFolderBatch,
     updateBatch,
     registerBatchHandle,

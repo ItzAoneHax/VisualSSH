@@ -12,6 +12,8 @@ export interface MenuItem {
   separator?: boolean;
   /** 未实现/不适用的操作置灰，不 emit */
   disabled?: boolean;
+  /** 置灰原因等悬浮提示（ContextMenu 透传 title） */
+  title?: string;
 }
 
 defineProps<{

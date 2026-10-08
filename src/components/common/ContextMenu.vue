@@ -68,6 +68,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             :style="{ color: item.danger ? 'var(--danger)' : 'var(--ink)' }"
             :disabled="item.disabled"
             :aria-disabled="item.disabled"
+            :title="item.title"
             @click="!item.disabled && emit('select', item.key)"
           >
             <span class="flex w-4 shrink-0 justify-center">
