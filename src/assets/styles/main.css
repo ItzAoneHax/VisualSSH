@@ -167,6 +167,19 @@ body {
     var(--bg);
 }
 
+/* 窗口材质（设置-外观，Files BackdropMaterialType 语义）：Mica/Acrylic 时基底降透明度，
+   让 Tauri setEffects 挂的系统底衬透出；档位经 html[data-material] 驱动，none 无此属性=实色现状 */
+:root[data-material="mica"] body {
+  background:
+    linear-gradient(var(--app-bg-tint, transparent), var(--app-bg-tint, transparent)),
+    color-mix(in srgb, var(--bg) 42%, transparent);
+}
+:root[data-material="acrylic"] body {
+  background:
+    linear-gradient(var(--app-bg-tint, transparent), var(--app-bg-tint, transparent)),
+    color-mix(in srgb, var(--bg) 30%, transparent);
+}
+
 /* 可编辑区域恢复文本选择与光标行为（输入框/就地重命名/编辑器 CodeMirror） */
 input,
 textarea,
