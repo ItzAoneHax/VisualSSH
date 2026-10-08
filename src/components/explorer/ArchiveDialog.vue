@@ -2,7 +2,7 @@
 import { ref, watch } from "vue";
 
 import Modal from "@/components/common/Modal.vue";
-import type { CompressFormat } from "@/utils/archive";
+import { swapArchiveExt, type CompressFormat } from "@/utils/archive";
 
 /**
  * 压缩为…（第五阶段块 C2，范式对照 Files CreateArchiveDialog.xaml）：
@@ -45,10 +45,8 @@ const FORMATS: { key: CompressFormat; label: string; tool: "tar" | "zip" }[] = [
 function pickFormat(key: CompressFormat, tool: "tar" | "zip") {
   const available = tool === "tar" ? props.tarAvailable : props.zipAvailable;
   if (!available) return;
-  // 换格式时同步替换扩展名
-  const dot = name.value.lastIndexOf(".");
-  const stem = dot > 0 ? name.value.slice(0, dot) : name.value;
-  name.value = `${stem}.${key}`;
+  // 换格式时同步替换扩展名（完整剥档案后缀：a.tar.gz → a.zip，不留冗余 .tar）
+  name.value = swapArchiveExt(name.value, key);
   format.value = key;
 }
 

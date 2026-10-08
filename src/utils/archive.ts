@@ -177,14 +177,29 @@ export function uniqueName(base: string, taken: Set<string>): string {
   }
 }
 
-/** 压缩输出默认名：单选取首项去扩展名（a.txt → a），多选 archive */
+/** 压缩输出默认名：单选取首项去扩展名（a.txt → a；本身就是档案后缀的完整剥，
+ *  避免 a.tar.gz → a.tar.tar.gz），多选 archive */
 export function defaultArchiveName(firstItemName: string | null, format: CompressFormat): string {
   let base = "archive";
   if (firstItemName) {
-    const dot = firstItemName.lastIndexOf(".");
-    base = dot > 0 ? firstItemName.slice(0, dot) : firstItemName;
+    const stripped = archiveBaseName(firstItemName);
+    if (stripped !== firstItemName) {
+      base = stripped;
+    } else {
+      const dot = firstItemName.lastIndexOf(".");
+      base = dot > 0 ? firstItemName.slice(0, dot) : firstItemName;
+    }
   }
   return `${base}.${format}`;
+}
+
+/** 换压缩格式时同步输出名扩展名：完整剥档案后缀（a.tar.gz → a.zip 而非 a.tar.zip）；
+ *  无档案后缀的名按最后一个点剥（custom.txt → custom.zip），无点直接拼 */
+export function swapArchiveExt(name: string, format: CompressFormat): string {
+  const base = archiveBaseName(name);
+  if (base !== name) return `${base}.${format}`;
+  const dot = name.lastIndexOf(".");
+  return `${dot > 0 ? name.slice(0, dot) : name}.${format}`;
 }
 
 /** 能力探测（C1）：单条 sh 循环逐个 command -v，输出可用工具名（每行一个） */

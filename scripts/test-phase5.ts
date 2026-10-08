@@ -21,6 +21,7 @@ import {
   planExtraction,
   requiredToolFor,
   shQuote,
+  swapArchiveExt,
   uniqueName,
   unsafeEntries,
 } from "../src/utils/archive.ts";
@@ -288,6 +289,23 @@ check("defaultArchiveName: 单选去扩展名 / 多选 archive / 无 tar 用 zip
   assert.equal(defaultArchiveName("a.txt", "zip"), "a.zip");
   assert.equal(defaultArchiveName("proj", "tar.gz"), "proj.tar.gz");
   assert.equal(defaultArchiveName(null, "tar.gz"), "archive.tar.gz");
+});
+
+check("defaultArchiveName: 档案名输入完整剥后缀（a.tar.gz → a.tar.gz 不叠加）", () => {
+  assert.equal(defaultArchiveName("a.tar.gz", "tar.gz"), "a.tar.gz");
+  assert.equal(defaultArchiveName("a.tar.gz", "zip"), "a.zip");
+  assert.equal(defaultArchiveName("b.zip", "tar.gz"), "b.tar.gz");
+});
+
+check("swapArchiveExt: 换格式完整剥档案后缀（a.tar.gz → a.zip 不留冗余 .tar）", () => {
+  assert.equal(swapArchiveExt("a.tar.gz", "zip"), "a.zip");
+  assert.equal(swapArchiveExt("a.zip", "tar.gz"), "a.tar.gz");
+  assert.equal(swapArchiveExt("b.tgz", "zip"), "b.zip");
+  assert.equal(swapArchiveExt("c.tar.bz2", "zip"), "c.zip");
+  assert.equal(swapArchiveExt("a.tar.gz", "tar.gz"), "a.tar.gz");
+  // 非档案后缀按最后一个点剥；无点直接拼
+  assert.equal(swapArchiveExt("custom.txt", "zip"), "custom.zip");
+  assert.equal(swapArchiveExt("noext", "tar.gz"), "noext.tar.gz");
 });
 
 check("探测解析: 逐行工具名 / 空输出", () => {
