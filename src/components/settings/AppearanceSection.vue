@@ -2,6 +2,7 @@
 import {
   Code,
   Image as ImageIcon,
+  Layers,
   Paintbrush,
   Palette,
   PanelBottom,
@@ -116,6 +117,13 @@ const TRANSFER_VISIBILITY_OPTIONS = [
   { key: "activeOnly", label: "仅传输进行中显示" },
 ];
 
+/** 窗口材质（Files BackdropMaterialType 三档简化：Solid=无 / Mica / Acrylic） */
+const MATERIAL_OPTIONS = [
+  { key: "none", label: "无" },
+  { key: "mica", label: "Mica" },
+  { key: "acrylic", label: "Acrylic" },
+];
+
 /** 详情视图行高密度（LayoutSizeKindHelper.GetDetailsViewRowHeight 五档） */
 const ROW_HEIGHT_OPTIONS = [
   { key: "28", label: "紧凑（28px）" },
@@ -165,6 +173,23 @@ function stepFontSize(which: "editorFontSize" | "terminalFontSize", delta: numbe
           {{ mode.label }}
         </button>
       </div>
+    </div>
+
+    <!-- 窗口材质（Files AppThemeBackdropMaterial 语义：Solid=无，Mica/Acrylic 为窗口系统底衬） -->
+    <div class="settings-card">
+      <Layers :size="20" class="shrink-0 text-dim" />
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium">窗口材质</p>
+        <p class="mt-0.5 text-xs text-dim">
+          为窗口底衬应用系统材质，应用面板将半透明透出（Mica/Acrylic 需要 Windows 11）。
+        </p>
+      </div>
+      <SettingsSelect
+        :model-value="s.windowMaterial"
+        :options="MATERIAL_OPTIONS"
+        label="窗口材质"
+        @update:model-value="(key) => settings.update({ windowMaterial: key as typeof s.windowMaterial })"
+      />
     </div>
 
     <!-- 应用背景色：预设色卡 + 自定义取色器 -->

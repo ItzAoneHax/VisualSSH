@@ -19,6 +19,8 @@ export type ConflictResolveOption = "newName" | "replace" | "skip";
 export type DeleteConfirmationPolicy = "always" | "permanentOnly" | "never";
 /** 传输中心入口可见性（Files StatusCenterVisibility：始终 / 仅传输进行中） */
 export type TransferCenterVisibility = "always" | "activeOnly";
+/** 窗口材质（Files BackdropMaterialType 的三档简化：无 / Mica / Acrylic，Solid=None） */
+export type WindowMaterial = "none" | "mica" | "acrylic";
 
 const STORAGE_KEY = "visualssh:settings:v1";
 
@@ -79,6 +81,8 @@ export interface AppSettings {
   infoPaneHeight: number;
   /** 表格图片缩略图（块 B，默认开） */
   showThumbnails: boolean;
+  /** 窗口材质（Files AppThemeBackdropMaterial 简化档；none=实色底=现状，Mica/Acrylic 需 Win11） */
+  windowMaterial: WindowMaterial;
 }
 
 const DEFAULTS: AppSettings = {
@@ -112,6 +116,7 @@ const DEFAULTS: AppSettings = {
   infoPaneWidth: 250,
   infoPaneHeight: 300,
   showThumbnails: true,
+  windowMaterial: "none",
 };
 
 function load(): AppSettings {
@@ -144,6 +149,10 @@ function load(): AppSettings {
     }
     merged.infoPaneWidth = Math.min(1600, Math.max(100, Math.round(merged.infoPaneWidth)));
     merged.infoPaneHeight = Math.min(1600, Math.max(100, Math.round(merged.infoPaneHeight)));
+    // 窗口材质只接受三档
+    if (!["none", "mica", "acrylic"].includes(merged.windowMaterial)) {
+      merged.windowMaterial = "none";
+    }
     return merged;
   } catch {
     return { ...DEFAULTS };
@@ -212,6 +221,12 @@ export const useSettingsStore = defineStore("settings", () => {
     document.documentElement.classList.toggle("dark", dark);
     const rootStyle = document.documentElement.style;
     rootStyle.setProperty("--app-bg-tint", settings.value.bgColor);
+    // 窗口材质档位写 data 属性驱动 main.css 的透底规则（none 移除 = 实色现状）
+    if (settings.value.windowMaterial === "none") {
+      delete document.documentElement.dataset.material;
+    } else {
+      document.documentElement.dataset.material = settings.value.windowMaterial;
+    }
     // 重算 --panel-solid = 半透明 panel 叠在（tint 叠 bg）上的预混实体色：
     // sticky 列头保持不透明，且与半透明面板透出 body 的观感一致——
     // 设置应用背景色后列头不再成为异色块（浅色下仍接近白，深色下随 tint）。
@@ -239,6 +254,27 @@ export const useSettingsStore = defineStore("settings", () => {
     // 同步应用：watch 批处理会合并同 tick 的连续变更、丢末态
     applyDom();
     persist();
+    if (patch.windowMaterial !== undefined) void applyWindowMaterial();
+  }
+
+  /**
+   * 窗口材质（Files AppSystemBackdrop 语义）：Mica/Acrylic 经 Tauri setEffects
+   * 挂系统底衬，none 清除恢复实色。浏览器预览无 Tauri、权限缺失时静默跳过。
+   */
+  async function applyWindowMaterial() {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    try {
+      const { getCurrentWindow, Effect } = await import("@tauri-apps/api/window");
+      const effects =
+        settings.value.windowMaterial === "mica"
+          ? [Effect.Mica]
+          : settings.value.windowMaterial === "acrylic"
+            ? [Effect.Acrylic]
+            : [];
+      await getCurrentWindow().setEffects({ effects });
+    } catch {
+      // 系统不支持（如 Win10 无 Mica）或权限缺失：保持现状
+    }
   }
 
   function openSettings() {
@@ -252,6 +288,8 @@ export const useSettingsStore = defineStore("settings", () => {
   // 启动即对齐 DOM（首帧脚本已处理过一遍，这里保证 system 模式的监听器就位）
   if (settings.value.theme === "system") watchSystem();
   applyDom();
+  // 启动恢复上次窗口材质
+  void applyWindowMaterial();
 
   return {
     settings,
