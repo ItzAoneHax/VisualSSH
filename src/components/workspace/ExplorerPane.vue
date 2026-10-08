@@ -9,8 +9,10 @@ import {
   Copy,
   Download,
   Eye,
+  FileArchive,
   FilePlus,
   FolderDown,
+  FolderInput,
   FolderOpen,
   FolderPlus,
   FolderSearch,
@@ -22,6 +24,7 @@ import {
   PinOff,
   RefreshCw,
   Scissors,
+  SquareTerminal,
   StopCircle,
   TextSelect,
   Trash2,
@@ -33,11 +36,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import ContextMenu from "@/components/common/ContextMenu.vue";
 import type { MenuItem } from "@/components/common/DropdownMenu.vue";
 import Modal from "@/components/common/Modal.vue";
+import ArchiveDialog from "@/components/explorer/ArchiveDialog.vue";
 import Breadcrumbs from "@/components/explorer/Breadcrumbs.vue";
 import ChmodDialog from "@/components/explorer/ChmodDialog.vue";
 import FileTable from "@/components/explorer/FileTable.vue";
 import PropertiesDialog from "@/components/explorer/PropertiesDialog.vue";
 import { useClipboardStore } from "@/stores/clipboard";
+import { useArchivesStore } from "@/stores/archives";
 import { useConnectionsStore } from "@/stores/connections";
 import { useConflictStore, type ConflictDecision } from "@/stores/conflicts";
 import { useEditorStore } from "@/stores/editor";
@@ -49,6 +54,14 @@ import { useTransferStore } from "@/stores/transfer";
 import { useToastStore } from "@/stores/toast";
 import { useWorkspaceStore } from "@/stores/workspace";
 import type { FileEntry } from "@/types";
+import {
+  archiveBaseName,
+  archiveFamilyOf,
+  defaultArchiveName,
+  requiredToolFor,
+} from "@/utils/archive";
+import { compressSelection, extractArchive } from "@/utils/archiveOps";
+import { buildScpCommand } from "@/utils/scp";
 import { copyText, joinPath, pathBaseName } from "@/utils/format";
 import {
   isCrossConnection,
@@ -85,6 +98,7 @@ const conflicts = useConflictStore();
 const clip = useClipboardStore();
 const settings = useSettingsStore();
 const terminalStore = useTerminalStore();
+const archivesStore = useArchivesStore();
 
 /** 本窗格所属标签的连接（窗格共享标签的 connectionId） */
 const conn = computed(() => connectionsStore.byId[connectionId.value] ?? null);
@@ -435,6 +449,75 @@ async function downloadEntries(files: FileEntry[]) {
   }
 }
 
+/** —— 压缩/解压（第五阶段块 C）：能力探测（C1）+ 菜单项 + 创建/解压编排 —— */
+
+// 连接建立后惰性探测一次服务器压缩工具（缓存于 archives store）
+watch(
+  connectionId,
+  (cid) => {
+    if (cid) void archivesStore.ensureProbe(cid);
+  },
+  { immediate: true },
+);
+
+/** 压缩菜单可用性：tar 或 zip 任一存在（C6：全缺才置灰 + tooltip） */
+const canCompress = computed(
+  () =>
+    archivesStore.has(connectionId.value, "tar") ||
+    archivesStore.has(connectionId.value, "zip"),
+);
+
+/** 档案解压工具就绪（tar 家族→tar / zip→unzip / gz→gzip） */
+function extractReady(name: string): { ok: boolean; tool: string } {
+  const family = archiveFamilyOf(name);
+  if (!family) return { ok: false, tool: "" };
+  const tool = requiredToolFor(family);
+  return { ok: archivesStore.has(connectionId.value, tool), tool };
+}
+
+/** 「压缩为…」对话框状态（打开时按选择预填默认名） */
+const archiveDialog = ref<{ names: string[]; defaultName: string } | null>(null);
+
+function openArchiveDialog(entry: FileEntry | null) {
+  const names = resolveTargetNames(entry);
+  if (!names?.length || !canCompress.value) return;
+  const first = names.length === 1 ? (explorer.entryByName(names[0])?.name ?? null) : null;
+  archiveDialog.value = {
+    names,
+    defaultName: defaultArchiveName(first, archivesStore.has(connectionId.value, "tar") ? "tar.gz" : "zip"),
+  };
+}
+
+async function onArchiveSubmit({ format, name }: { format: "tar.gz" | "zip"; name: string }) {
+  const dialog = archiveDialog.value;
+  archiveDialog.value = null;
+  const cid = connectionId.value;
+  if (!dialog || !cid) return;
+  await compressSelection(explorer, cid, dialog.names, format, name);
+}
+
+/** 解压入口（菜单/Ctrl+Shift+E smart） */
+async function runExtract(entry: FileEntry, mode: "here" | "subdir" | "smart") {
+  const cid = connectionId.value;
+  if (!cid) return;
+  await extractArchive(explorer, cid, entry, mode, {
+    has: (tool) => archivesStore.has(cid, tool),
+  });
+}
+
+/** —— 复制 scp 命令（第五阶段块 D1）：scp -P <port> "user@host:path" . —— */
+async function copyScpCommand(entry: FileEntry | null) {
+  const connSnap = conn.value;
+  if (!connSnap) return;
+  const names = resolveTargetNames(entry);
+  if (!names?.length) return;
+  const paths = names.map((n) => joinPath(explorer.cwd, n));
+  await copyText(
+    buildScpCommand({ host: connSnap.profile.host, port: connSnap.profile.port, username: connSnap.profile.username }, paths),
+  );
+  showHint(`已复制 ${paths.length} 项的 scp 命令`);
+}
+
 /** 文件区滚动容器：进入新目录回顶部；原地刷新（文件操作后）保持滚动 */
 const fileAreaRef = ref<HTMLElement | null>(null);
 /** 标签标题 = 当前目录名（挂载即同步一次——导航可能早于组件挂载完成，watch 会错过） */
@@ -567,6 +650,7 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
     }
     items.push(
       { key: "copyPath", label: "复制路径", icon: ClipboardCopy },
+      { key: "copyScp", label: "复制 scp 命令", icon: SquareTerminal },
       {
         key: "download",
         label: "下载到…",
@@ -619,6 +703,7 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
     { key: "copy", label: "复制", icon: Copy },
     { key: "copyName", label: "复制名称", icon: TextSelect },
     { key: "copyPath", label: "复制路径", icon: ClipboardCopy },
+    { key: "copyScp", label: "复制 scp 命令", icon: SquareTerminal },
     {
       key: "download",
       label: "下载到…",
@@ -626,6 +711,38 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
       // 单文件直接下；多选集合全为文件时放开逐个下载，含文件夹/链接仍置灰（未递归）
       disabled: downloadTargets(entry).length === 0,
     },
+  );
+  // 压缩为…（C2）：tar/zip 全缺置灰 + tooltip（C6）
+  items.push({
+    key: "compress",
+    label: "压缩为…",
+    icon: FileArchive,
+    disabled: !canCompress.value,
+    title: canCompress.value ? undefined : "服务器缺少 tar/zip 命令，无法压缩",
+  });
+  // 解压（C3）：仅支持的档案格式出现菜单项；工具缺失置灰 + tooltip（C6）
+  const family = archiveFamilyOf(entry.name);
+  if (family) {
+    const ready = extractReady(entry.name);
+    const title = ready.ok ? undefined : `服务器缺少 ${ready.tool} 命令`;
+    items.push(
+      {
+        key: "extractHere",
+        label: "解压到当前目录",
+        icon: FolderInput,
+        disabled: !ready.ok,
+        title,
+      },
+      {
+        key: "extractSubdir",
+        label: `解压到 “${archiveBaseName(entry.name)}”`,
+        icon: FolderPlus,
+        disabled: !ready.ok,
+        title,
+      },
+    );
+  }
+  items.push(
     { key: "sep2", label: "", separator: true },
     { key: "rename", label: "重命名", icon: Pencil },
     { key: "delete", label: "删除", icon: Trash2 },
@@ -647,6 +764,21 @@ async function onCtxMenuSelect(key: string) {
       explorer.enterSearchEntry((entry as { relPath?: string }).relPath ?? entry.name);
     } else if (key === "copyPath") {
       await copyText(searchHitFullPath(entry));
+    } else if (key === "copyScp") {
+      const connSnap = conn.value;
+      if (connSnap) {
+        await copyText(
+          buildScpCommand(
+            {
+              host: connSnap.profile.host,
+              port: connSnap.profile.port,
+              username: connSnap.profile.username,
+            },
+            [searchHitFullPath(entry)],
+          ),
+        );
+        showHint("已复制 scp 命令");
+      }
     } else if (key === "download") {
       if (entry.kind !== "file") return;
       const target = await save({ defaultPath: entry.name });
@@ -694,6 +826,18 @@ async function onCtxMenuSelect(key: string) {
       break;
     case "copyPath":
       await copyText(joinPath(explorer.cwd, entry.name));
+      break;
+    case "copyScp":
+      await copyScpCommand(entry);
+      break;
+    case "compress":
+      openArchiveDialog(entry);
+      break;
+    case "extractHere":
+      void runExtract(entry, "here");
+      break;
+    case "extractSubdir":
+      void runExtract(entry, "subdir");
       break;
     case "downloadFolder": {
       if (connectionId.value) {
@@ -749,6 +893,30 @@ function onMouseSideButton(e: PointerEvent) {
   else explorer.forward();
 }
 
+/** —— 输入即定位（第五阶段块 D2，Explorer 惯例；Files 无此功能）：
+ *  300ms 内连续输入拼接为前缀，匹配首个可见行（单选 + scrollIntoView）；
+ *  超时重置。输入框聚焦与编辑器/终端浮层让位由 onKeydown 前置分支完成 —— */
+let typeBuffer = "";
+let typeTimer: ReturnType<typeof setTimeout> | undefined;
+
+function handleTypeAhead(e: KeyboardEvent) {
+  if (e.isComposing || e.key === " ") return;
+  typeBuffer = (typeBuffer + e.key).toLowerCase();
+  clearTimeout(typeTimer);
+  typeTimer = setTimeout(() => (typeBuffer = ""), 300);
+  const hit = explorer.visibleEntries.find((entry) =>
+    explorer.rowKeyOf(entry).toLowerCase().startsWith(typeBuffer),
+  );
+  if (!hit) return;
+  const key = explorer.rowKeyOf(hit);
+  explorer.selectOnly(key);
+  void nextTick(() => {
+    document
+      .querySelector(`[data-row="${CSS.escape(key)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  });
+}
+
 /** F2 重命名、Delete 删除选中项、Ctrl+C/X/V 剪贴板；Alt+Enter 属性；
  *  Alt+↑ 上一级 / Alt+← 后退 / Alt+→ 前进；
  *  F5·Ctrl+R 刷新 / Backspace 上一级 / Ctrl+A 全选 / Ctrl+I 反选 /
@@ -764,6 +932,11 @@ function onKeydown(e: KeyboardEvent) {
   }
   // 悬浮窗（编辑器/终端）打开时让位
   if (editor.open || terminalStore.open) return;
+  // D2 输入即定位：可打印字符（无修饰键）前缀匹配首行
+  if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    handleTypeAhead(e);
+    return;
+  }
   if (e.ctrlKey && (e.key === "c" || e.key === "C")) {
     // Ctrl+Shift+C：复制选中项路径（Files CopyItemPathAction：多选换行连接，无选中复制当前目录）
     if (e.shiftKey) {
@@ -787,6 +960,15 @@ function onKeydown(e: KeyboardEvent) {
     e.preventDefault();
     // Ctrl+Shift+V：恰好选中一个文件夹时粘贴进该文件夹
     void pasteFromClipboard(e.shiftKey);
+    return;
+  }
+  if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "e" || e.key === "E")) {
+    // Ctrl+Shift+E smart 解压（Files DecompressArchiveHereSmartAction 热键）：单选档案生效
+    e.preventDefault();
+    if (explorer.selectedNames.size === 1) {
+      const entry = explorer.entryByName([...explorer.selectedNames][0]);
+      if (entry && archiveFamilyOf(entry.name)) void runExtract(entry, "smart");
+    }
     return;
   }
   if (e.ctrlKey && (e.key === "r" || e.key === "R")) {
@@ -1060,6 +1242,16 @@ function onKeydown(e: KeyboardEvent) {
         chmodTarget = null;
         if (target) explorer.chmodEntry(target.name, mode);
       }"
+    />
+
+    <!-- 压缩为…（C2：格式 + 文件名，服务器侧 exec 创建） -->
+    <ArchiveDialog
+      :open="!!archiveDialog"
+      :default-name="archiveDialog?.defaultName ?? ''"
+      :tar-available="archivesStore.has(connectionId, 'tar')"
+      :zip-available="archivesStore.has(connectionId, 'zip')"
+      @close="archiveDialog = null"
+      @submit="onArchiveSubmit"
     />
 
     <!-- 属性：单页（类型/位置/时间/属主组/权限/链接目标 + 递归统计），单选可改名 -->
