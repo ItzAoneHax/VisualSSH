@@ -30,3 +30,13 @@ export function readClipboardFiles(): Promise<string[]> {
 export function writeClipboardFiles(paths: string[]): Promise<void> {
   return invoke("clipboard_write_files", { paths });
 }
+
+/** 剪贴板图片 → PNG 字节（块 B；CF_PNG > CF_DIBV5 > CF_DIB）；无图返回 null */
+export function readClipboardImage(): Promise<Uint8Array | null> {
+  return invoke("clipboard_read_image");
+}
+
+/** PNG 字节落盘系统临时目录 paste-<时间戳>.png，返回本地路径 */
+export function saveClipboardImage(png: Uint8Array): Promise<string> {
+  return invoke("clipboard_save_image", { png });
+}

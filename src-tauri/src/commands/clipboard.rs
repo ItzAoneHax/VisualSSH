@@ -27,6 +27,48 @@ pub async fn clipboard_write_files(paths: Vec<String>) -> Result<()> {
         .map_err(|e| Error::Clipboard(format!("写入系统剪贴板失败: {e}")))
 }
 
+/// 读取剪贴板图片为 PNG 字节（块 B）。格式优先级 CF_PNG > CF_DIBV5 > CF_DIB；
+/// 无图返回 None。剪贴板 API 为同步阻塞，放阻塞线程池避免卡命令调度。
+#[tauri::command]
+pub async fn clipboard_read_image() -> Result<Option<Vec<u8>>> {
+    tauri::async_runtime::spawn_blocking(|| Ok(crate::clipboard_image::read_image_png()))
+        .await
+        .map_err(|e| Error::Clipboard(format!("读取剪贴板图片失败: {e}")))?
+}
+
+/// paste-<yyyyMMdd-HHmmss> 时间戳（ASCII 安全文件名；Howard Hinnant civil_from_days）
+fn paste_timestamp() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let (h, min, s) = ((secs % 86400) / 3600, (secs % 3600) / 60, secs % 60);
+    let days = (secs / 86400) as i64;
+    // civil_from_days：Unix 天数 → (y, mo, d)
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if mo <= 2 { y + 1 } else { y };
+    format!("{y:04}{mo:02}{d:02}-{h:02}{min:02}{s:02}")
+}
+
+/// 把 PNG 字节落盘到系统临时目录 paste-<yyyyMMdd-HHmmss>.png，返回路径（上传管线消费）。
+#[tauri::command]
+pub async fn clipboard_save_image(png: Vec<u8>) -> Result<String> {
+    let name = format!("paste-{}.png", paste_timestamp());
+    let path = std::env::temp_dir().join(name);
+    tokio::fs::write(&path, png)
+        .await
+        .map_err(|e| Error::Clipboard(format!("写入临时图片失败: {e}")))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 /// 远端文件 → OLE 虚拟文件剪贴板（CFSTR_FILEDESCRIPTORW + FILECONTENTS）。
 /// 复制瞬间零下载：粘贴到本地资源管理器时才经 IStream 按需流式拉取。
 #[tauri::command]

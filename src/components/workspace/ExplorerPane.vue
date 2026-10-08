@@ -39,6 +39,7 @@ import FileTable from "@/components/explorer/FileTable.vue";
 import PropertiesDialog from "@/components/explorer/PropertiesDialog.vue";
 import { useClipboardStore } from "@/stores/clipboard";
 import { useConnectionsStore } from "@/stores/connections";
+import { useConflictStore, type ConflictDecision } from "@/stores/conflicts";
 import { useEditorStore } from "@/stores/editor";
 import { useExplorer } from "@/stores/explorer";
 import { usePinnedStore } from "@/stores/pinned";
@@ -60,6 +61,7 @@ import {
 } from "@/utils/recursiveTransfer";
 import { crossConnectionTransfer, remoteMoveCopy } from "@/utils/remoteOps";
 import { copyVirtualFiles, readClipboardFiles } from "@/api/clipboard";
+import { readClipboardImage, saveClipboardImage } from "@/api/clipboard";
 
 /**
  * 单个窗格（M7 步骤 2/3）：导航段（后退/前进/上一级/刷新/面包屑）+ 文件区 +
@@ -76,6 +78,7 @@ const workspace = useWorkspaceStore();
 const explorer = useExplorer(props.paneId);
 const editor = useEditorStore();
 const transfers = useTransferStore();
+const conflicts = useConflictStore();
 const clip = useClipboardStore();
 const settings = useSettingsStore();
 const terminalStore = useTerminalStore();
@@ -183,13 +186,56 @@ async function pasteFromClipboard(pasteIntoSelection = false) {
   try {
     localPaths = await readClipboardFiles();
   } catch {
+    localPaths = [];
+  }
+  if (localPaths.length) {
+    try {
+      await uploadMixedPaths(cid, localPaths, explorer.cwd);
+    } catch (e) {
+      explorer.error = e instanceof Error ? e.message : String(e);
+    }
     return;
   }
-  if (!localPaths.length) return;
+  await pasteImageFromClipboard(cid);
+}
+
+/** 图片直传回落（块 B）：HDROP 空而含位图 → PNG 上传活动窗格目录，
+ *  冲突走对话框；完成后 toast + 选中。无图静默（终端/编辑器已让位不达此处）。 */
+async function pasteImageFromClipboard(cid: string) {
+  let png: Uint8Array | null;
   try {
-    await uploadMixedPaths(cid, localPaths, explorer.cwd);
+    png = await readClipboardImage();
+  } catch {
+    return; // 剪贴板占用等：按无图处理
+  }
+  if (!png || !png.length) return;
+  let tempPath: string;
+  try {
+    tempPath = await saveClipboardImage(png);
   } catch (e) {
     explorer.error = e instanceof Error ? e.message : String(e);
+    return;
+  }
+  const incomingName = pathBaseName(tempPath);
+  let decisions: ConflictDecision[] | null;
+  try {
+    decisions = await conflicts.resolve(cid, explorer.cwd, [
+      { name: incomingName, size: png.length, mtime: null, kind: "file" },
+    ]);
+  } catch (e) {
+    explorer.error = e instanceof Error ? e.message : String(e);
+    return;
+  }
+  const decision = decisions?.[0];
+  if (!decisions || !decision || decision.action !== "proceed") return;
+  const id = await transfers.startUpload(cid, tempPath, explorer.cwd, decision.finalName);
+  const ok = await transfers.waitAllDone([id]);
+  await explorer.reloadPreserve();
+  if (ok) {
+    explorer.selectedNames = new Set([decision.finalName]);
+    showHint(`已粘贴图片 ${decision.finalName}`);
+  } else {
+    explorer.error = `图片粘贴失败 — ${decision.finalName}`;
   }
 }
 

@@ -5443,6 +5443,7 @@ dependencies = [
  "clipboard-win",
  "dirs",
  "keyring",
+ "png 0.17.16",
  "russh",
  "russh-sftp",
  "serde",
