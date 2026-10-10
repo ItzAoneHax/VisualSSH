@@ -670,16 +670,17 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
   }
   if (!entry) {
     return [
-      { key: "newDir", label: "新建文件夹", icon: FolderPlus },
+      { key: "newDir", label: "新建文件夹", icon: FolderPlus, accelerator: "Ctrl+Shift+N" },
       { key: "newFile", label: "新建文件", icon: FilePlus },
       { key: "sep", label: "", separator: true },
       {
         key: "paste",
         label: clip.count ? `粘贴（${clip.count} 项）` : "粘贴",
         icon: ClipboardPaste,
+        accelerator: "Ctrl+V",
         disabled: clip.count === 0,
       },
-      { key: "refresh", label: "刷新", icon: RefreshCw },
+      { key: "refresh", label: "刷新", icon: RefreshCw, accelerator: "Ctrl+R" },
       { key: "sep2", label: "", separator: true },
       {
         key: "hidden",
@@ -707,8 +708,18 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
     items.push({ key: "downloadFolder", label: "下载文件夹…", icon: FolderDown });
   }
   items.push(
-    { key: "cut", label: "剪切", icon: Scissors },
-    { key: "copy", label: "复制", icon: Copy },
+    // 一级图标命令行（Files ContentPageContextFlyoutFactory.cs:493-547 IsPrimary 序：
+    // 剪切/复制/粘贴/重命名/(共享)/删除/属性；SFTP 无系统共享跳过，ShareItem 不做）
+    { key: "cut", label: "剪切", icon: Scissors, primary: true, accelerator: "Ctrl+X" },
+    { key: "copy", label: "复制", icon: Copy, primary: true, accelerator: "Ctrl+C" },
+    {
+      key: "paste",
+      label: "粘贴",
+      icon: ClipboardPaste,
+      primary: true,
+      accelerator: "Ctrl+V",
+      disabled: clip.count === 0,
+    },
     { key: "copyName", label: "复制名称", icon: TextSelect },
     { key: "copyPath", label: "复制路径", icon: ClipboardCopy },
     { key: "copyScp", label: "复制 scp 命令", icon: SquareTerminal },
@@ -752,12 +763,13 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
   }
   items.push(
     { key: "sep2", label: "", separator: true },
-    { key: "rename", label: "重命名", icon: Pencil },
-    { key: "delete", label: "删除", icon: Trash2 },
+    { key: "rename", label: "重命名", icon: Pencil, primary: true, accelerator: "F2" },
+    { key: "delete", label: "删除", icon: Trash2, primary: true, accelerator: "Delete", danger: true },
     { key: "sep3", label: "", separator: true },
     { key: "chmod", label: "修改权限", icon: Lock },
     { key: "sep4", label: "", separator: true },
-    { key: "properties", label: "属性", icon: Info },
+    // 属性进一级行（Files OpenProperties IsPrimary；Alt+Enter 未绑定不标 accelerator）
+    { key: "properties", label: "属性", icon: Info, primary: true },
   );
   return items;
 });
@@ -828,6 +840,10 @@ async function onCtxMenuSelect(key: string) {
       break;
     case "copy":
       void copySelectionToClipboard(entry);
+      break;
+    case "paste":
+      // 选中项右键的粘贴（Files PasteItemToSelection：贴入当前目录）
+      void pasteFromClipboard(false);
       break;
     case "copyName":
       await copyText(entry.name);

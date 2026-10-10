@@ -14,6 +14,12 @@ export interface MenuItem {
   disabled?: boolean;
   /** 置灰原因等悬浮提示（ContextMenu 透传 title） */
   title?: string;
+  /** 进顶部一级图标命令行（Win11 右键菜单 38×38 图标按钮；
+   *  Files FastContextFlyout.cs IsPrimary 过滤，App.xaml:37-86 PrimaryCommandButtonStyle） */
+  primary?: boolean;
+  /** 快捷键提示列文本（如 "Ctrl+C"；仅标真实存在的绑定；
+   *  MenuFlyoutItemWithImage.xaml:67-79 Caption 右对齐、左距 24） */
+  accelerator?: string;
 }
 
 defineProps<{
@@ -64,14 +70,18 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             @click="!item.disabled && emit('select', item.key)"
           >
             <span class="flex w-4 justify-center">
-              <component :is="item.icon" v-if="item.icon" :size="15" class="text-dim" />
+              <component :is="item.icon" v-if="item.icon" :size="16" class="text-dim" />
               <span
                 v-else-if="item.checked"
                 class="h-[7px] w-[7px] rounded-full"
                 :style="{ background: 'var(--accent)' }"
               />
             </span>
-            {{ item.label }}
+            <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
+            <!-- 快捷键提示列（MenuFlyoutItemWithImage.xaml:67-79：Caption 右对齐、左距 24） -->
+            <span v-if="item.accelerator" class="ml-6 shrink-0 text-xs text-dim">
+              {{ item.accelerator }}
+            </span>
           </button>
         </template>
       </div>

@@ -296,7 +296,7 @@ function isTabLoading(tab: WorkspaceTab) {
 
 function onTabContextMenu(tab: WorkspaceTab, e: MouseEvent) {
   const items: MenuItem[] = [
-    { key: "new", label: "新建标签", icon: Plus },
+    { key: "new", label: "新建标签", icon: Plus, accelerator: "Ctrl+T" },
     { key: "duplicate", label: "复制标签", icon: Folder },
   ];
   if (workspace.tabs.length > 1) {
@@ -309,10 +309,10 @@ function onTabContextMenu(tab: WorkspaceTab, e: MouseEvent) {
   }
   items.push(
     { key: "sepClose2", label: "", separator: true },
-    { key: "close", label: "关闭标签", icon: X },
+    { key: "close", label: "关闭标签", icon: X, accelerator: "Ctrl+W" },
   );
   if (workspace.closedTabs.length) {
-    items.push({ key: "reopen", label: "重新打开已关闭标签" });
+    items.push({ key: "reopen", label: "重新打开已关闭标签", accelerator: "Ctrl+Shift+T" });
   }
   tabMenuItems.value = items;
   tabMenu.value = { open: true, x: e.clientX, y: e.clientY, tabId: tab.id };
