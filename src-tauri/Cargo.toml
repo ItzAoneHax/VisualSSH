@@ -58,8 +58,11 @@ tauri-plugin-notification = "2.4.0"
 tauri-plugin-opener = "2.5.5"
 
 [profile.release]
-codegen-units = 1
-lto = true
+# thin LTO + 16 codegen units：较 fat LTO/单 unit 的全量优化大幅缩短链接时间
+# （改前端资源也会触发 app crate 全量重编，此档位把该路径压到 ~1 分钟内），
+# 代价仅 exe 体积略增（~1MB）；opt-level=s 保体积、panic=abort/strip 不变
+codegen-units = 16
+lto = "thin"
 opt-level = "s"
 panic = "abort"
 strip = true

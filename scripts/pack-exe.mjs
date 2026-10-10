@@ -3,6 +3,9 @@
  *   1. 调用 tauri build（前端构建 + Rust release 编译）
  *   2. 把 src-tauri/target/release/VisualSSH.exe 复制到项目根目录
  *
+ * 默认 --no-bundle（跳过 MSI/NSIS 安装包——单文件 exe 用不到，省二三十秒）；
+ * 需要安装包时传 --bundle：npm run exe:bundle（或 node scripts/pack-exe.mjs --bundle）
+ *
  * 用法：npm run exe
  */
 import { spawnSync } from "node:child_process";
@@ -11,10 +14,13 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
+const wantBundle = process.argv.includes("--bundle");
 
-console.log("▶ npm run tauri build（首次编译 Rust 依赖需数分钟）…");
-const build = spawnSync(npmCmd, ["run", "tauri", "build"], {
+const args = ["tauri", "build"];
+if (!wantBundle) args.push("--no-bundle");
+console.log(`▶ npx ${args.join(" ")}${wantBundle ? "" : "（跳过安装包打包）"}…`);
+const build = spawnSync(npxCmd, args, {
   cwd: root,
   stdio: "inherit",
   shell: true,

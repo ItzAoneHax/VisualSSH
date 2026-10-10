@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "exe": "node scripts/pack-exe.mjs",
+    "exe:bundle": "node scripts/pack-exe.mjs --bundle",
     "test": "node --experimental-strip-types scripts/test-phase4.ts",
     "test:phase5": "node --experimental-strip-types scripts/test-phase5.ts"
   },
