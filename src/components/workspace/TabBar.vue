@@ -289,6 +289,11 @@ function onTabNewFilesDrop(e: Event) {
 const tabMenu = ref<{ open: boolean; x: number; y: number; tabId: string } | null>(null);
 const tabMenuItems = ref<MenuItem[]>([]);
 
+/** 标签加载态：活动窗格在加载即转圈（ProgressRing 取代图标，Files TabViewTemplateSettings） */
+function isTabLoading(tab: WorkspaceTab) {
+  return useExplorer(tab.activePaneId).loading;
+}
+
 function onTabContextMenu(tab: WorkspaceTab, e: MouseEvent) {
   const items: MenuItem[] = [
     { key: "new", label: "新建标签", icon: Plus },
@@ -481,7 +486,11 @@ function duplicateTab(tab: WorkspaceTab) {
           <path d="M5 4.5H4.5A4 4 0 0 1 0.5 0.5" style="stroke: var(--line)" stroke-width="1" />
         </svg>
       </template>
+      <!-- 图标位：加载中换 ProgressRing（TabBarStyles.xaml:166-171 LoadingIndicator
+           取代 IconBox，尺寸=TabViewItemHeaderIconSize 16） -->
+      <span v-if="isTabLoading(tab)" class="tab-progress-ring" aria-label="加载中" />
       <Folder
+        v-else
         :size="14"
         class="shrink-0"
         :class="tab.id === workspace.activeTabId ? 'text-accent' : 'text-faint'"
@@ -497,6 +506,14 @@ function duplicateTab(tab: WorkspaceTab) {
       >
         <X :size="12" />
       </button>
+
+      <!-- 标签间分隔符（TabViewItemSeparator=DividerStrokeColorDefault 1px、上下缩进 8；
+           hover/按下让位 Opacity 0，选中态保持——TabBarStyles.xaml:127-134,226,237） -->
+      <span
+        class="pointer-events-none absolute top-2 right-0 bottom-2 w-px opacity-100 group-hover:opacity-0 group-active:opacity-0"
+        :style="{ background: 'var(--line)' }"
+        aria-hidden="true"
+      />
     </div>
 
     <!-- 新建标签（Files TabBarAddNewTabButton：30×30 透明底；文件拖入 = 新标签打开被拖文件夹） -->

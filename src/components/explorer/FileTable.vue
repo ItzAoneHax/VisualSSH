@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { File, Folder, Link2, SearchX } from "@lucide/vue";
+import { File, Folder, Link2 } from "@lucide/vue";
 import { computed, nextTick, ref, watch } from "vue";
 
 import ContextMenu from "@/components/common/ContextMenu.vue";
@@ -733,9 +733,12 @@ function onHoverBlank() {
         </div>
       </div>
 
-      <div v-else-if="!explorer.newDraft" class="flex flex-col items-center pt-20 text-dim">
-        <component :is="explorer.searchQuery ? SearchX : Folder" :size="28" class="mb-3 text-faint" />
-        <span class="text-sm">
+      <!-- 空态：无图标纯文本、距内容区顶 125px 居中、默认前景
+           （FolderEmptyIndicator.xaml:14-44 无 Foreground setter + DetailsLayoutPage.xaml:189-194
+            Margin="0,125,0,0" Center/Top，125 自表头在内的内容区顶起算——本容器顶=卡内容顶，
+            表头 40px 在流内，故 padding 85；搜索无结果同控件换文案） -->
+      <div v-else-if="!explorer.newDraft" class="flex flex-col items-center pt-[85px]">
+        <span class="text-sm text-ink">
           {{ explorer.searchQuery ? `没有匹配「${explorer.searchQuery}」的项目` : "此目录为空" }}
         </span>
       </div>

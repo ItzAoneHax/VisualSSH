@@ -723,6 +723,24 @@ body.tab-dragging {
   background: var(--fill-subtle);
 }
 
+/* ---- 标签加载态（TabBarStyles.xaml:166-171 ProgressRing 取代 IconBox，
+   尺寸=TabViewItemHeaderIconSize 16 的 TabViewItemHeaderIconMargin —— WinUI
+   indeterminate 环形旋转；加载指示为功能性动画，不随 reduced-motion 降级） ---- */
+.tab-progress-ring {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border: 1.5px solid var(--line-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: tab-ring-spin 0.9s linear infinite;
+}
+@keyframes tab-ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* ---- 表头排序指示（Files DataGridHeader.xaml:113-187）----
    字形 EDDB（SortIconAscending）、FontSize 8、Tertiary 色；升降序同一字形，
    模板以 inline transform rotate(0deg)/rotate(-180deg) 200ms 线性驱动（Files
