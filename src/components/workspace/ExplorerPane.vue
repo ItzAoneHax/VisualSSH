@@ -1037,10 +1037,15 @@ function onKeydown(e: KeyboardEvent) {
     @pointerdown="activatePane"
     @contextmenu="activatePane"
   >
-    <!-- 地址行卡（Win11：后退/前进/刷新在地址栏左侧）；#actions 插槽承载搜索框与全局按钮 -->
+    <!-- 地址行卡（Win11：后退/前进/刷新在地址栏左侧）；#actions 插槽承载搜索框与全局按钮。
+        单栏时本卡承接上方选中标签的熔接：顶边透明，可视线由主列熔接顶线绘制（带标签缺口） -->
     <div
       class="flex h-12 shrink-0 items-center gap-1 rounded-lg px-1"
-      :style="{ background: 'var(--toolbar)', border: '1px solid var(--line)' }"
+      :style="{
+        background: 'var(--toolbar)',
+        border: '1px solid var(--line)',
+        borderTopColor: isDualPane ? 'var(--line)' : 'transparent',
+      }"
     >
       <button
         type="button"

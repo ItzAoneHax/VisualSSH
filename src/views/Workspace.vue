@@ -203,25 +203,32 @@ function onWinResize() {
 }
 
 /** —— 标签与工具条卡熔接顶线 ——
- *  卡片自身顶边透明（ExplorerPane 单栏卡/双栏全局行），线由主列统一绘制，
- *  并在活动标签正下方留出真实缺口（Files：选中段底边线隐藏；半透明标签盖不住
- *  不透明线，故线必须物理断开）——位置随标签激活/增删/重排与窗口尺寸变化重测 */
+ *  线即「卡片顶边线」：宽度对齐卡片本体（left-2.5/right-2 镜像主列内边距，两端再各让 8px
+ *  给卡片圆角），上提 1px 落在标签条底行——即 Files 每个标签自带的 BottomBorderLine。
+ *  活动标签下方留真实缺口，缺口端各向外扩 4px，与标签底部凹弧自带的 4px 水平段端头
+ *  拼接成一条连续外框。位置随标签激活/增删/重排与窗口尺寸变化重测 */
 const mainColRef = ref<HTMLElement | null>(null);
-const fusionStyle = ref<{ background: string }>({ background: "var(--line)" });
+const fusionRef = ref<HTMLElement | null>(null);
+const PLAIN_LINE =
+  'linear-gradient(90deg, transparent 0 8px, var(--line) 8px calc(100% - 8px), transparent calc(100% - 8px) 100%)';
+const fusionStyle = ref<{ background: string }>({ background: PLAIN_LINE });
 let fusionResizeObserver: ResizeObserver | null = null;
 
 function measureFusion() {
-  const col = mainColRef.value;
-  if (!col) return;
+  const layer = fusionRef.value;
+  if (!layer) return;
   const el = document.querySelector("[data-active-tab]");
   if (!el) {
-    fusionStyle.value = { background: "var(--line)" };
+    fusionStyle.value = { background: PLAIN_LINE };
     return;
   }
+  const lr = layer.getBoundingClientRect();
   const r = el.getBoundingClientRect();
-  const a = Math.max(8, r.left - col.getBoundingClientRect().left);
-  const b = Math.min(col.clientWidth - 8, a + r.width);
-  // 两端各留 8px（卡片圆角半径）：直线出头会越过圆角（用户真机报告），圆角段无线
+  const w = lr.width;
+  // 缺口 [a, b]：标签矩形左右各外扩 4px —— 标签底部凹弧自带 4px 水平段，缺口端点与该
+  // 水平段起点在整数像素处对接：既不重叠（避免半透明 --line 叠色发亮）也不留缝
+  const a = Math.max(8, Math.min(w - 8, r.left - 4 - lr.left));
+  const b = Math.max(a, Math.min(w - 8, r.right + 4 - lr.left));
   fusionStyle.value = {
     background: `linear-gradient(90deg, transparent 0 8px, var(--line) 8px ${a}px, transparent ${a}px ${b}px, var(--line) ${b}px calc(100% - 8px), transparent calc(100% - 8px) 100%)`,
   };
@@ -888,9 +895,12 @@ watch(
           <InfoPane class="shrink-0" :style="{ height: `${infoHeight}px` }" />
         </template>
 
-        <!-- 熔接顶线：工具条卡的顶边可视线，活动标签下方留缺口（位置见 measureFusion） -->
+        <!-- 熔接顶线：宽度对齐工具条卡本体（left-2.5/right-2 镜像主列 pl-2.5/pr-2，两端 8px
+            让位卡片圆角），-top-px 落在标签条底行 = Files 每标签自带的 BottomBorderLine，
+            活动标签下方留缺口 -->
         <div
-          class="pointer-events-none absolute top-0 right-0 left-0 z-10 h-px"
+          ref="fusionRef"
+          class="pointer-events-none absolute -top-px left-2.5 right-2 z-10 h-px"
           :style="fusionStyle"
           aria-hidden="true"
         />
