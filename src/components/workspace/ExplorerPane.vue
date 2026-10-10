@@ -1040,8 +1040,12 @@ function onKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
+  <!-- 根容器承载整组卡（地址行卡+文件区卡）的浮起投影：Files 的投影挂在一张大卡
+       （ModernShellPage RootGrid，含内部工具栏），此处两卡同间隙并集=该大卡矩形，
+       容器投影=沿并集外周（缝隙内部无影）；8px 圆角仅整形阴影（与卡的圆角同径） -->
   <div
-    class="flex min-h-0 min-w-0 flex-1 flex-col gap-1"
+    class="flex min-h-0 min-w-0 flex-1 flex-col gap-1 rounded-lg"
+    :style="{ boxShadow: 'var(--card-shadow)' }"
     @pointerdown="activatePane"
     @contextmenu="activatePane"
   >

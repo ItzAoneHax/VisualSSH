@@ -53,6 +53,12 @@
   --row-active: #00000009;
   --row-active-hover: #00000006;
 
+  /* 文件区卡浮起投影（Files ModernShellPage.xaml:34-45 ThemeShadow 的等效；
+     ThemeShadow 未设 Translation(z=0)，Win11 起忽略 Receivers 直投下方内容，
+     观感=Fluent elevation-8 卡片档：取 Fluent 2 官方 shadow8 token 公式
+     0 0 2px ambient + 0 4px 8px key，light ambient/key=12%/14% 黑） */
+  --card-shadow: 0 0 2px rgb(0 0 0 / 0.12), 0 4px 8px rgb(0 0 0 / 0.14);
+
   /* WinUI Slider 专色（Slider_themeresources.xaml / Common_themeresources_any.xaml） */
   --slider-thumb-outer: #ffffff; /* ControlSolidFillColorDefault */
   --slider-track-rest: #00000072; /* ControlStrongFillColorDefault */
@@ -100,6 +106,9 @@
   --row-hover: #ffffff0f;
   --row-active: #ffffff0f;
   --row-active-hover: #ffffff0a;
+
+  /* dark 主题阴影不透明度加倍（Fluent colorNeutralShadowAmbient/Key dark 值） */
+  --card-shadow: 0 0 2px rgb(0 0 0 / 0.24), 0 4px 8px rgb(0 0 0 / 0.28);
 
   --slider-thumb-outer: #454545;
   --slider-track-rest: #ffffff8b;

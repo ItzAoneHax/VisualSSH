@@ -357,10 +357,12 @@ function duplicateTab(tab: WorkspaceTab) {
 <template>
   <!-- 左距 = 侧栏 w-56(14rem) + 10px：首标签左缘与下方面板（工具条卡）左缘对齐——
       选中首标签的左侧外框与卡片左边框同 x 连成一条竖线（卡片顶左角同步转直角，
-      见 ExplorerPane / Workspace 双栏行按 activeTabIsFirst 置 0） -->
+      见 ExplorerPane / Workspace 双栏行按 activeTabIsFirst 置 0）。
+      relative z-10：标签条绘制在文件区卡投影之上——卡片顶边（熔接处）的阴影
+      泛出段被选中标签背景盖住，与 Files 的 ThemeShadow 被标签遮挡一致 -->
   <div
     ref="stripRef"
-    class="flex h-9 shrink-0 items-end gap-1 pl-[calc(14rem+10px)] pr-1"
+    class="relative z-10 flex h-9 shrink-0 items-end gap-1 pl-[calc(14rem+10px)] pr-1"
   >
     <!-- 活动标签背景与下方工具条同色熔接；顶边线的缺口由主列统一绘制（Workspace 熔接顶线），
         标签只需 data-active-tab 供其测量缺口位置 -->
