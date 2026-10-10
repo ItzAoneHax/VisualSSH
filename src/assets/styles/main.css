@@ -25,6 +25,7 @@
   --fill-subtle: #00000009; /* 悬停 */
   --fill-pressed: #00000006; /* 按下 */
   --fill-control: #ffffffb3; /* 选中 */
+  --fill-alt: #0000000f; /* ControlAltFillColorTertiary（表头 hover 背景） */
 
   --line: #0000000f; /* DividerStrokeColorDefault */
   --line-strong: #00000029; /* ControlStrokeColorSecondary（输入框描边） */
@@ -84,6 +85,7 @@
   --fill-subtle: #ffffff0f;
   --fill-pressed: #ffffff0a;
   --fill-control: #ffffff0f;
+  --fill-alt: #ffffff0b;
 
   --line: #ffffff15;
   --line-strong: #ffffff18;
@@ -136,6 +138,7 @@
   --color-fill-subtle: var(--fill-subtle);
   --color-fill-pressed: var(--fill-pressed);
   --color-fill-control: var(--fill-control);
+  --color-fill-alt: var(--fill-alt);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
   --color-ink: var(--ink);
@@ -720,6 +723,20 @@ body.tab-dragging {
   background: var(--fill-subtle);
 }
 
+/* ---- 表头排序指示（Files DataGridHeader.xaml:113-187）----
+   字形 EDDB（SortIconAscending）、FontSize 8、Tertiary 色；升降序同一字形，
+   模板以 inline transform rotate(0deg)/rotate(-180deg) 200ms 线性驱动（Files
+   RotateTransform To=0/-180 Duration 0:0:0.2）；Win10 回退 Segoe MDL2 Assets */
+.sort-icon {
+  font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets";
+  font-size: 8px;
+  line-height: 1;
+  color: var(--faint);
+}
+.sort-icon::before {
+  content: "\EDDB";
+}
+
 @media (prefers-reduced-motion: reduce) {
   .view-enter-active,
   .view-leave-active,
@@ -742,5 +759,8 @@ body.tab-dragging {
   }
   .file-row-origin {
     transition: none;
+  }
+  .sort-icon {
+    transition-duration: 0s;
   }
 }

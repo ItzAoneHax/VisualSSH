@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, ChevronUp, File, Folder, Link2, SearchX } from "@lucide/vue";
+import { File, Folder, Link2, SearchX } from "@lucide/vue";
 import { computed, nextTick, ref, watch } from "vue";
 
 import ContextMenu from "@/components/common/ContextMenu.vue";
@@ -562,9 +562,11 @@ function onHoverBlank() {
     @files-drop="onBlankFilesDrop"
     @files-hover-blank="onHoverBlank"
   >
-    <!-- 列头：40 高、左距 24、底部分隔线，点击排序；右缘 4px 拖宽/双击自适应；右键勾选列显隐 -->
+    <!-- 列头：40 高、左距 24、底部分隔线，点击排序；右缘 4px 拖宽/双击自适应；右键勾选列显隐。
+        文字 12px SemiBold Tertiary、hover 背景 ControlAltFillColorTertiary（离散帧无过渡）、
+        排序指示=字形 EDDB 8px 旋转 0/−180°（DataGridHeader.xaml:67,113-187） -->
     <div
-      class="sticky top-0 z-10 grid items-center border-b pl-6 text-xs text-dim"
+      class="sticky top-0 z-10 grid items-center border-b pl-6 text-xs text-faint"
       :style="{ height: '40px', borderColor: 'var(--line)', background: 'var(--panel-solid)', gridTemplateColumns: gridTemplate }"
       @contextmenu.stop.prevent="onHeaderContextMenu"
     >
@@ -572,20 +574,16 @@ function onHoverBlank() {
         v-for="col in visibleColumns"
         :key="col.key"
         type="button"
-        class="relative flex h-full items-center gap-1 text-left font-normal hover:text-ink"
+        class="relative flex h-full items-center gap-1 text-left font-semibold hover:bg-fill-alt hover:text-ink"
         :class="headerClass(col.key)"
         @click="explorer.sortBy(col.key)"
       >
-        {{ headerLabel(col.key) }}
-        <ChevronUp
-          v-if="explorer.sortKey === col.key && explorer.sortAsc"
-          :size="12"
-          class="text-dim"
-        />
-        <ChevronDown
-          v-else-if="explorer.sortKey === col.key"
-          :size="12"
-          class="text-dim"
+        <span class="truncate">{{ headerLabel(col.key) }}</span>
+        <span
+          v-if="explorer.sortKey === col.key"
+          class="sort-icon shrink-0 transition-transform duration-200 ease-linear"
+          :style="{ transform: explorer.sortAsc ? 'rotate(0deg)' : 'rotate(-180deg)' }"
+          aria-hidden="true"
         />
         <!-- 拖宽/双击自适应命中区（名称列恒弹性不提供；拦下 click 防误触排序） -->
         <span
@@ -743,17 +741,19 @@ function onHoverBlank() {
       </div>
     </template>
 
-    <!-- 橡皮筋选框（视口坐标，强调色描边 + 半透明填充） -->
+    <!-- 橡皮筋选框（视口坐标）：Fill=SystemAccentColor Opacity .5 + Stroke=SystemAccentColorLight1 1px
+         （GridLayoutPage.xaml:1171-1182 / DetailsLayoutPage.xaml:1547-1558；Opacity 作用于整个
+         矩形含描边；Light1=accent 提亮 10% 的 color-mix 等效） -->
     <div
       v-if="rubber"
-      class="pointer-events-none fixed z-30"
+      class="pointer-events-none fixed z-30 opacity-50"
       :style="{
         left: `${Math.min(rubber.x1, rubber.x2)}px`,
         top: `${Math.min(rubber.y1, rubber.y2)}px`,
         width: `${Math.abs(rubber.x2 - rubber.x1)}px`,
         height: `${Math.abs(rubber.y2 - rubber.y1)}px`,
-        background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
-        border: '1px solid var(--accent)',
+        background: 'var(--accent)',
+        border: '1px solid color-mix(in srgb, var(--accent) 90%, white)',
       }"
     />
 
