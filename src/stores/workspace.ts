@@ -50,6 +50,9 @@ export const useWorkspaceStore = defineStore("workspace", () => {
   const activeTabId = ref("");
   /** 重开已关闭标签栈（最近在上，上限 10） */
   const closedTabs = ref<ClosedTabRecord[]>([]);
+  /** 拖拽重排中的标签 id（null=无）：拖拽中的标签不算完整标签，
+      首标签熔接特判（直角/左段无线）随之失效（TabBar/Workspace/ExplorerPane 共享） */
+  const tabDragId = ref<string | null>(null);
 
   const activeTab = computed(
     () => tabs.value.find((t) => t.id === activeTabId.value) ?? null,
@@ -270,6 +273,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     tabs.value = [];
     activeTabId.value = "";
     closedTabs.value = [];
+    tabDragId.value = null;
   }
 
   /** 当前活动窗格的浏览器状态（组件统一经此取实例） */
@@ -285,6 +289,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     activePaneCount,
     activeConnectionId,
     closedTabs,
+    tabDragId,
     init,
     openTab,
     activateTab,

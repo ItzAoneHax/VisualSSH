@@ -110,6 +110,14 @@ const profileId = computed(() => conn.value?.profile.id ?? "");
 const isDualPane = computed(
   () => (workspace.tabs.find((t) => t.id === props.tabId)?.panes.length ?? 1) > 1,
 );
+/** 本窗格标签是否首标签：单栏时工具条卡承接选中标签的熔接，首标签左侧外框与卡片
+ *  左边框同 x 连续成竖线 → 卡片顶左角转直角；非首标签保持 8px 圆角（顶线左段绕角）。
+ *  该标签正被拖拽时不算完整标签（浮起为 ghost）→ 熔接特判失效，卡片恢复圆角 */
+const tabIsFirst = computed(
+  () =>
+    workspace.tabDragId !== props.tabId &&
+    workspace.tabs[0]?.id === props.tabId,
+);
 
 /** 点击/右键切换活动窗格（Files Pane_PointerPressed/GotFocus：按钮/输入框上按下除外，
  *  切换时清空另一窗格选择——setActivePane 内处理） */
@@ -1038,13 +1046,16 @@ function onKeydown(e: KeyboardEvent) {
     @contextmenu="activatePane"
   >
     <!-- 地址行卡（Win11：后退/前进/刷新在地址栏左侧）；#actions 插槽承载搜索框与全局按钮。
-        单栏时本卡承接上方选中标签的熔接：顶边透明，可视线由主列熔接顶线绘制（带标签缺口） -->
+        单栏时本卡承接上方选中标签的熔接：顶边透明，可视线由主列熔接顶线绘制（带标签缺口）；
+        选中首标签时顶左角转直角（左侧外框与标签侧边连续成竖线） -->
     <div
+      data-toolbar-card
       class="flex h-12 shrink-0 items-center gap-1 rounded-lg px-1"
       :style="{
         background: 'var(--toolbar)',
         border: '1px solid var(--line)',
         borderTopColor: isDualPane ? 'var(--line)' : 'transparent',
+        borderTopLeftRadius: !isDualPane && tabIsFirst ? '0px' : undefined,
       }"
     >
       <button

@@ -38,13 +38,12 @@ import { useTerminalStore } from "@/stores/terminal";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { formatSize, pathBaseName } from "@/utils/format";
 import {
-  hasFilesPayload,
   isCrossConnection,
   isSameDir,
-  readFilesPayload,
   resolveDropMode,
   type FilesDragPayload,
 } from "@/utils/dragDrop";
+import { fileDrag } from "@/utils/fileDrag";
 import { crossConnectionTransfer, remoteMoveCopy } from "@/utils/remoteOps";
 import { uploadMixedPaths } from "@/utils/recursiveTransfer";
 import { fsInfo, type FsInfo } from "@/api/ssh";
@@ -202,11 +201,18 @@ function onWinResize() {
   measureFusion();
 }
 
-/** —— 标签与工具条卡熔接顶线 ——
- *  线即「卡片顶边线」：宽度对齐卡片本体（left-2.5/right-2 镜像主列内边距，两端再各让 8px
- *  给卡片圆角），上提 1px 落在标签条底行——即 Files 每个标签自带的 BottomBorderLine。
- *  活动标签下方留真实缺口，缺口端各向外扩 4px，与标签底部凹弧自带的 4px 水平段端头
- *  拼接成一条连续外框。位置随标签激活/增删/重排与窗口尺寸变化重测 */
+/** —— 标签与工具条卡熔接顶线（圆角熔接版）——
+ *  线即「卡片顶边线」：宽度对齐卡片本体（left-2.5/right-2 镜像主列内边距），top-0
+ *  精确落在卡片顶边框所在行（卡片 borderTopColor 透明让位，避免双线）。选中标签下方
+ *  留缺口 [a,b] = 标签矩形左右各外扩 4px——标签底部凹弧（r=4，见 TabBar）自带 4px
+ *  水平切线段，缺口端与该切线段起点在整数像素处对接：既不重叠（避免半透明 --line
+ *  叠色发亮）也不留缝。首标签左侧豁免：标签左侧外框与卡片左边框连续成竖线，顶线
+ *  左侧无段；卡片两个 8px 顶角圆弧由熔接层 SVG 补全（borderTopColor 透明时 CSS 圆角
+ *  只渲染对角线外侧的下半截，上半截归透明的顶边——SVG 弧与卡片圆角同心同径补齐）。
+ *  被拖拽的是激活标签本身时：无熔接，顶线连续 + 两角圆弧齐全（面板回到完整卡片）；
+ *  拖拽其他标签时激活标签缺口保持。位置随标签激活/增删/重排（含拖拽中的 live 重排）
+ *  与窗口尺寸变化重测；标签矩形取 offsetLeft 布局口径——FLIP 滑动的 transform 不
+ *  参与，重排中缺口始终贴最终布局位 */
 const mainColRef = ref<HTMLElement | null>(null);
 const fusionRef = ref<HTMLElement | null>(null);
 const PLAIN_LINE =
@@ -214,23 +220,43 @@ const PLAIN_LINE =
 const fusionStyle = ref<{ background: string }>({ background: PLAIN_LINE });
 let fusionResizeObserver: ResizeObserver | null = null;
 
+/** 选中首标签熔接生效（左侧外框与卡片左边框连续成竖线，卡片顶左角转直角）：
+ *  选中标签是首标签且它没在被拖拽——拖拽中的标签不算完整标签（浮起为 ghost、条内
+ *  仅占位），它自己的熔接特判失效：卡片恢复 8px 圆角、顶线恢复连续 */
+const activeTabIsFirst = computed(
+  () =>
+    workspace.tabDragId !== workspace.activeTabId &&
+    workspace.tabs[0]?.id === workspace.activeTabId,
+);
+
 function measureFusion() {
   const layer = fusionRef.value;
   if (!layer) return;
-  const el = document.querySelector("[data-active-tab]");
-  if (!el) {
+  const el = document.querySelector<HTMLElement>("[data-active-tab]");
+  // 激活标签本身被拖拽：无熔接，顶线连续（两端各让 8px 圆弧）；拖的是其他标签时
+  // 激活标签的缺口保持
+  if (!el || workspace.tabDragId === workspace.activeTabId) {
     fusionStyle.value = { background: PLAIN_LINE };
     return;
   }
   const lr = layer.getBoundingClientRect();
-  const r = el.getBoundingClientRect();
+  const op = el.offsetParent?.getBoundingClientRect() ?? lr;
+  // 缺口 [a,b]：标签矩形左右各外扩 4px（凹弧的 4px 水平切线段占位，端头整数像素对接）
+  const a = op.left + el.offsetLeft - lr.left - 4;
+  const b = a + el.offsetWidth + 8;
   const w = lr.width;
-  // 缺口 [a, b]：标签矩形左右各外扩 4px —— 标签底部凹弧自带 4px 水平段，缺口端点与该
-  // 水平段起点在整数像素处对接：既不重叠（避免半透明 --line 叠色发亮）也不留缝
-  const a = Math.max(8, Math.min(w - 8, r.left - 4 - lr.left));
-  const b = Math.max(a, Math.min(w - 8, r.right + 4 - lr.left));
+  if (activeTabIsFirst.value && a <= 5) {
+    // 首标签：缺口 [0, b]，顶线只剩右段（左端与标签左侧外框/卡片左边框同点收笔；
+    // 标签右底凹弧的 4px 切线段占用到 b）
+    fusionStyle.value = {
+      background: `linear-gradient(90deg, transparent 0 ${b}px, var(--line) ${b}px calc(100% - 8px), transparent calc(100% - 8px) 100%)`,
+    };
+    return;
+  }
+  const aClamped = Math.max(8, Math.min(w - 8, a));
+  const bClamped = Math.max(aClamped, Math.min(w - 8, b));
   fusionStyle.value = {
-    background: `linear-gradient(90deg, transparent 0 8px, var(--line) 8px ${a}px, transparent ${a}px ${b}px, var(--line) ${b}px calc(100% - 8px), transparent calc(100% - 8px) 100%)`,
+    background: `linear-gradient(90deg, transparent 0 8px, var(--line) 8px ${aClamped}px, transparent ${aClamped}px ${bClamped}px, var(--line) ${bClamped}px calc(100% - 8px), transparent calc(100% - 8px) 100%)`,
   };
 }
 
@@ -240,6 +266,7 @@ watch(
     workspace.tabs.length,
     workspace.tabs.map((t) => t.id).join(","),
     isDualPane.value,
+    workspace.tabDragId,
   ],
   () => void nextTick(measureFusion),
 );
@@ -489,43 +516,29 @@ function onPinMenuSelect(key: string) {
   } else if (key === "unpin" && pid) pinnedStore.unpin(pid, menu.path);
 }
 
-/** —— 行内拖拽落点（M7 步骤 4，Files SidebarViewModel.cs HandleLocationItemDroppedAsync）：
- *  拖到具体收藏项 = 移动/复制到该目录；拖到 Pinned 区空白 = 固定该源文件夹 —— */
-const pinDragOverPath = ref<string | null>(null);
-const pinBlankOver = ref(false);
+/** —— 指针拖拽落点（Files SidebarViewModel HandleLocationItemDroppedAsync）：
+ *  拖到具体收藏项 = 移动/复制到该目录（悬停 1300ms 导航过去）；
+ *  拖到「此服务器」标题 = 固定该源文件夹；高亮 = Tertiary 底 + 2px accent 边框外扩 1px
+ *  （SidebarStyles.xaml DragOnTopIndicator） —— */
+const pinDropPath = computed(() => {
+  const t = fileDrag.target;
+  return t?.kind === "pinned-item" ? t.dir : null;
+});
 
-function onPinDragOver(path: string, e: DragEvent) {
-  if (!hasFilesPayload(e.dataTransfer!)) return;
-  e.preventDefault();
-  e.stopPropagation();
-  e.dataTransfer!.dropEffect = resolveDropMode(e.ctrlKey) === "copy" ? "copy" : "move";
-  pinDragOverPath.value = path;
-}
-
-function onPinDrop(path: string, e: DragEvent) {
-  if (!hasFilesPayload(e.dataTransfer!)) return;
-  e.preventDefault();
-  e.stopPropagation();
-  pinDragOverPath.value = null;
-  const payload = readFilesPayload(e.dataTransfer!);
+function onPinFilesDrop(path: string, e: Event) {
+  const { payload, ctrlKey } = (e as CustomEvent).detail as {
+    payload: FilesDragPayload;
+    ctrlKey: boolean;
+  };
   const ex = activeExplorer.value;
   const cid = activeConn.value?.connectionId;
   if (!payload || !ex || !cid) return;
-  void executePaneMoveCopy(payload, path, e.ctrlKey, ex, cid);
+  void executePaneMoveCopy(payload, path, ctrlKey, ex, cid);
 }
 
-/** Pinned 区空白（nav 自身收到 drop = 非按钮区域）：固定源文件夹（仅文件夹） */
-function onPinBlankDragOver(e: DragEvent) {
-  if (!hasFilesPayload(e.dataTransfer!)) return;
-  e.preventDefault();
-  pinBlankOver.value = true;
-}
-
-function onPinBlankDrop(e: DragEvent) {
-  if (!hasFilesPayload(e.dataTransfer!)) return;
-  e.preventDefault();
-  pinBlankOver.value = false;
-  const payload = readFilesPayload(e.dataTransfer!);
+/** 「此服务器」标题落点：固定源目录本身；拖多选时仅固定源目录（与 Files 一致） */
+function onPinBlankFilesDrop(e: Event) {
+  const { payload } = (e as CustomEvent).detail as { payload: FilesDragPayload };
   const ex = activeExplorer.value;
   const pid = activeTab.value?.profileId;
   if (!payload || !ex || !pid) return;
@@ -533,7 +546,6 @@ function onPinBlankDrop(e: DragEvent) {
     ex.error = "暂不支持跨连接拖拽";
     return;
   }
-  // 固定源目录本身；拖多选时仅固定源目录（与 Files 一致：逐项固定目录）
   if (payload.dir !== "/" && !pinnedStore.isPinned(pid, payload.dir)) {
     pinnedStore.pin(pid, { name: pathBaseName(payload.dir) || payload.dir, path: payload.dir });
   }
@@ -695,10 +707,8 @@ watch(
 
           <p
             class="mt-4 mb-1 px-2.5 text-xs font-medium text-faint"
-            :class="pinBlankOver && 'rounded bg-fill-subtle ring-1 ring-[var(--accent)]'"
-            @dragover="onPinBlankDragOver"
-            @dragleave="pinBlankOver = false"
-            @drop="onPinBlankDrop"
+            data-drop-pin-blank
+            @files-drop="onPinBlankFilesDrop"
           >
             此服务器
           </p>
@@ -709,14 +719,16 @@ watch(
             class="nav-item"
             :class="[
               activeExplorer?.cwd === link.path && 'active',
-              pinDragOverPath === link.path && 'bg-row-active ring-1 ring-[var(--accent)]',
+              pinDropPath === link.path && 'drop-into-ring',
             ]"
             :title="link.path"
+            :data-drop-dir="link.path"
+            data-drop-kind="pinned-item"
+            :data-drop-label="link.name"
             @click="activeExplorer?.open(link.path)"
             @contextmenu.prevent="onPinContextMenu(link, $event)"
-            @dragover="onPinDragOver(link.path, $event)"
-            @dragleave="pinDragOverPath === link.path && (pinDragOverPath = null)"
-            @drop="onPinDrop(link.path, $event)"
+            @files-drop="onPinFilesDrop(link.path, $event)"
+            @files-hover-open="activeExplorer?.open(link.path)"
           >
             <component :is="PIN_ICONS[link.icon]" :size="16" class="ml-1 shrink-0" />
             <span class="ml-3 truncate">{{ link.name }}</span>
@@ -783,13 +795,16 @@ watch(
 
         <!-- 双窗格：全局工具行独立一行，两窗格各自渲染导航段 + 文件区 -->
         <template v-else-if="activeTab && workspace.activePaneId">
-          <!-- 全局工具行（一份：搜索框作用于活动窗格，无双份终端/传输）；顶边透明，线由主列熔接顶线绘制 -->
+          <!-- 全局工具行（一份：搜索框作用于活动窗格，无双份终端/传输）；顶边透明，线由主列熔接顶线绘制；
+              选中首标签时顶左角转直角（左侧外框与卡片左边框连续成竖线） -->
           <div
+            data-toolbar-card
             class="flex h-12 shrink-0 items-center gap-1 rounded-lg px-1"
             :style="{
               background: 'var(--toolbar)',
               border: '1px solid var(--line)',
               borderTopColor: 'transparent',
+              borderTopLeftRadius: activeTabIsFirst ? '0px' : undefined,
             }"
           >
             <span class="min-w-0 flex-1 truncate px-2 text-xs text-faint">
@@ -895,15 +910,42 @@ watch(
           <InfoPane class="shrink-0" :style="{ height: `${infoHeight}px` }" />
         </template>
 
-        <!-- 熔接顶线：宽度对齐工具条卡本体（left-2.5/right-2 镜像主列 pl-2.5/pr-2，两端 8px
-            让位卡片圆角），-top-px 落在标签条底行 = Files 每标签自带的 BottomBorderLine，
-            活动标签下方留缺口 -->
+        <!-- 熔接顶线：宽度对齐工具条卡本体（left-2.5/right-2 镜像主列 pl-2.5/pr-2），
+            top-0 精确落在卡片顶边框行（卡片顶边透明让位，无双线）；选中标签下方留
+            缺口（±4px 供标签底部凹弧切线段对接，首标签时左侧无段，见 measureFusion）。
+            两端 8px SVG 圆弧补全卡片被 borderTopColor 透明截掉的上半截圆角 -->
         <div
           ref="fusionRef"
-          class="pointer-events-none absolute -top-px left-2.5 right-2 z-10 h-px"
+          data-fusion-line
+          class="pointer-events-none absolute left-2.5 right-2 top-0 z-10 h-px"
           :style="fusionStyle"
           aria-hidden="true"
-        />
+        >
+          <!-- 顶左角 8px 圆弧（描边中心 7.5，外沿贴卡片盒）：与卡片圆角同心同径，
+              补齐 border-top 透明分走的上半截；首标签直角熔接时无弧（左竖线连续） -->
+          <svg
+            v-if="!activeTabIsFirst"
+            class="absolute left-0 top-0"
+            width="8"
+            height="8"
+            viewBox="0 0 8 8"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path d="M0.5 8A7.5 7.5 0 0 1 8 0.5" style="stroke: var(--line)" stroke-width="1" />
+          </svg>
+          <!-- 顶右角 8px 圆弧（镜像） -->
+          <svg
+            class="absolute right-0 top-0"
+            width="8"
+            height="8"
+            viewBox="0 0 8 8"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path d="M7.5 8A7.5 7.5 0 0 0 0 0.5" style="stroke: var(--line)" stroke-width="1" />
+          </svg>
+        </div>
       </div>
 
       <!-- 信息窗格（右侧模式）：主行内、主列之后（与侧栏对称） -->

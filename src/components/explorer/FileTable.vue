@@ -19,14 +19,13 @@ import {
   THUMBNAIL_MAX,
 } from "@/utils/preview";
 import { registerThumb, thumbVersion, type ThumbRequest } from "@/utils/thumbs";
+import { resolveDragNames, type FilesDragPayload } from "@/utils/dragDrop";
 import {
-  hasFilesPayload,
-  readFilesPayload,
-  resolveDragNames,
-  resolveDropMode,
-  writeFilesPayload,
-  type FilesDragPayload,
-} from "@/utils/dragDrop";
+  beginFileDragHold,
+  consumeClickGuard,
+  dropLabelOfDir,
+  fileDrag,
+} from "@/utils/fileDrag";
 
 const props = defineProps<{ paneId: string }>();
 
@@ -343,8 +342,9 @@ watch(
 );
 
 /** Windows 资源管理器语义：单击单选 / Ctrl+单击反选 / Shift+单击范围；
- *  开启「单击打开」后，无修饰键单击 = 打开 */
+ *  开启「单击打开」后，无修饰键单击 = 打开；拖拽刚结束的落点 click 被吞掉 */
 function onRowClick(entry: FileEntry, e: MouseEvent) {
+  if (consumeClickGuard()) return;
   const key = rowKey(entry);
   if (e.ctrlKey) {
     explorer.toggleSelect(key);
@@ -419,12 +419,30 @@ function hitTest(x1: number, y1: number, x2: number, y2: number): string[] {
 
 function onContainerPointerDown(e: PointerEvent) {
   if (e.button !== 0) return;
-  // 按钮/输入框不启动框选。行上按下也允许启动：真机 WebView2（Tauri 接管拖放）
-  // 不派发 HTML5 dragstart，行内拖拽不可用——行上拖动回落为框选（Win11 Explorer
-  // 同款手感）；支持 HTML5 DnD 的环境里 dragstart 触发 pointercancel 中止框选并
-  // 还原按下时的选择快照，行拖拽语义不受影响。
+  // 按钮/输入框不启动框选。行上按下也允许启动：快速拖动 = 框选（Win11 Explorer
+  // 同款手感）；行上长按 400ms 武装指针拖拽（真机无 HTML5 dragstart 的替代路径），
+  // beginFileDragHold 须先于下方框选监听注册——其 move 处理依赖本模块先行收敛 phase。
   if ((e.target as HTMLElement).closest("button, input, textarea, [contenteditable]")) return;
-  const onRow = !!(e.target as HTMLElement).closest("[data-row]");
+  const rowEl = (e.target as HTMLElement).closest<HTMLElement>("[data-row]");
+  const onRow = !!rowEl;
+  // 行上按下且可拖（非搜索视图、已连接）→ 启动长按计时；先移动超阈值则模块自行取消
+  if (rowEl && !inSearch.value && explorer.connectionId) {
+    const name = rowEl.dataset.row!;
+    const entry = explorer.entryByName(name);
+    if (entry) {
+      holdContext.value = { key: name };
+      beginFileDragHold(
+        rowEl,
+        {
+          connectionId: explorer.connectionId,
+          dir: explorer.cwd,
+          names: resolveDragNames(entry.name, explorer.selectedNames),
+        },
+        name,
+        e,
+      );
+    }
+  }
   const startX = e.clientX;
   const startY = e.clientY;
   const additive = e.ctrlKey;
@@ -433,6 +451,8 @@ function onContainerPointerDown(e: PointerEvent) {
   let raf = 0;
 
   const onMove = (ev: PointerEvent) => {
+    // 指针拖拽会话进行中（长按武装/拖动）：框选让位
+    if (fileDrag.phase !== "idle") return;
     if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 4) {
       moved = true;
       rubberActive.value = true;
@@ -459,8 +479,6 @@ function onContainerPointerDown(e: PointerEvent) {
     rubber.value = null;
     rubberActive.value = false;
   };
-  // drag 会话接管（浏览器环境行拖拽）：中止框选；拖动已污染的选择还原快照
-  //（行拖拽携带按下时的选中集合，Files 语义）
   const onCancel = () => {
     cleanup();
     if (moved) explorer.applyRubberSelection(snapshot, false);
@@ -469,7 +487,7 @@ function onContainerPointerDown(e: PointerEvent) {
     cleanup();
     if (moved) {
       explorer.applyRubberSelection(hitTest(startX, startY, ev.clientX, ev.clientY), additive);
-    } else if (!onRow) {
+    } else if (!onRow && !consumeClickGuard()) {
       // 未拖动的空白单击：清除选择（行上的单击选中交给行自身处理）
       explorer.clearSelection();
     }
@@ -479,108 +497,54 @@ function onContainerPointerDown(e: PointerEvent) {
   window.addEventListener("pointercancel", onCancel);
 }
 
-/** —— 行内拖拽（M7 步骤 4）：行 draggable，dragstart 写自定义载荷 + 「N 项」拖影；
- *  默认移动、Ctrl 复制（拖影角标随 drag 事件的按键状态切换）；落点走 drop-files 事件 —— */
+/** —— 指针长按拖拽（真机 WebView2 不派发 HTML5 dragstart 的替代，见 utils/fileDrag.ts）：
+ *  行上按下 400ms 武装 → 移动拖动快照；落点在命中元素上派发 files-drop，
+ *  悬停 1300ms 派发 files-hover-open；空白命中清空选择（Files 同语义） —— */
 
-/** 拖影 ghost（屏幕外挂载供 setDragImage；drag 事件里同步 Ctrl 角标） */
-let ghostEl: HTMLElement | null = null;
-let ghostBadge: HTMLElement | null = null;
+/** 武装会话的按下行（拖真启动时把未选中项单选，Files 语义） */
+const holdContext = ref<{ key: string } | null>(null);
 
-function startDragGhost(e: DragEvent, count: number) {
-  removeDragGhost();
-  ghostEl = document.createElement("div");
-  ghostEl.style.cssText =
-    "position:fixed;top:-200px;left:-200px;display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:4px;background:var(--accent);color:var(--accent-fg);font-size:12px;font-weight:600;pointer-events:none;z-index:9999;white-space:nowrap;";
-  ghostEl.textContent = count > 1 ? `${count} 项` : "1 项";
-  ghostBadge = document.createElement("span");
-  ghostBadge.textContent = "+";
-  ghostBadge.style.cssText = "display:none;font-weight:700;";
-  ghostEl.appendChild(ghostBadge);
-  document.body.appendChild(ghostEl);
-  if (e.dataTransfer) {
-    try {
-      e.dataTransfer.setDragImage(ghostEl, 10, 10);
-    } catch {
-      // 个别环境不支持自定义拖影：退回浏览器默认
-    }
-  }
+watch(
+  // 真拖动开始（armed 后首次超阈值移动）时把未选中的按下行单选（Files/WinUI：
+  // DragStarting 才改选；武装等待期与纯单击不得动选择）
+  () => fileDrag.phase === "dragging" && fileDrag.names.length > 0,
+  (dragStarted) => {
+    if (!dragStarted) return;
+    const ctx = holdContext.value;
+    if (ctx && !explorer.isSelected(ctx.key)) explorer.selectOnly(ctx.key);
+    holdContext.value = null;
+  },
+);
+
+/** 行落点（文件夹行）：复用 drop-files 事件链（ExplorerPane.onFilesDropped） */
+function onRowFilesDrop(entry: FileEntry, e: Event) {
+  const { payload, ctrlKey } = (e as CustomEvent).detail as {
+    payload: FilesDragPayload;
+    ctrlKey: boolean;
+  };
+  emit("dropFiles", payload, joinPath(explorer.cwd, entry.name), ctrlKey);
 }
 
-function removeDragGhost() {
-  ghostEl?.remove();
-  ghostEl = null;
-  ghostBadge = null;
+/** 空白落点 = 当前目录（行落点已由行自身处理，不冒泡到这里的语义） */
+function onBlankFilesDrop(e: Event) {
+  const { payload, ctrlKey } = (e as CustomEvent).detail as {
+    payload: FilesDragPayload;
+    ctrlKey: boolean;
+  };
+  emit("dropFiles", payload, explorer.cwd, ctrlKey);
 }
 
-/** drag 事件持续触发：Ctrl 按下 → 角标显示「+」（复制语义），松开移除 */
-function onRowDrag(e: DragEvent) {
-  if (ghostBadge) ghostBadge.style.display = e.ctrlKey ? "inline" : "none";
+/** 悬停 1300ms 打开（Files HoverToOpenTimespan：文件夹选中并进入，文件打开编辑器） */
+function onRowHoverOpen(entry: FileEntry) {
+  const key = rowKey(entry);
+  if (!explorer.isSelected(key)) explorer.selectOnly(key);
+  openEntry(entry);
 }
 
-function onRowDragStart(entry: FileEntry, e: DragEvent) {
-  // 搜索结果行（键为 relPath）不做行内拖拽：载荷按「源目录内名称」语义
-  if (inSearch.value || !explorer.connectionId) {
-    e.preventDefault();
-    return;
-  }
-  const names = resolveDragNames(entry.name, explorer.selectedNames);
-  writeFilesPayload(e.dataTransfer!, {
-    connectionId: explorer.connectionId,
-    dir: explorer.cwd,
-    names,
-  });
-  startDragGhost(e, names.length);
+/** 拖拽悬停空白：清空选择（Files BaseLayoutViewModel DragOverCommand） */
+function onHoverBlank() {
+  explorer.clearSelection();
 }
-
-function onRowDragEnd() {
-  dragOverDir.value = null;
-  removeDragGhost();
-}
-
-/** 文件夹行 dragover：命中高亮 + 放行 drop（stopPropagation 防止落到空白） */
-function onRowDragOver(entry: FileEntry, e: DragEvent) {
-  if (entry.kind !== "dir" || !hasFilesPayload(e.dataTransfer!)) return;
-  e.preventDefault();
-  e.stopPropagation();
-  e.dataTransfer!.dropEffect = resolveDropMode(e.ctrlKey) === "copy" ? "copy" : "move";
-  dragOverDir.value = entry.name;
-}
-
-function onRowDragLeave(entry: FileEntry) {
-  if (dragOverDir.value === entry.name) dragOverDir.value = null;
-}
-
-function onRowDrop(entry: FileEntry, e: DragEvent) {
-  if (entry.kind !== "dir") return;
-  e.preventDefault();
-  e.stopPropagation();
-  dragOverDir.value = null;
-  removeDragGhost();
-  const payload = readFilesPayload(e.dataTransfer!);
-  if (!payload) return;
-  emit("dropFiles", payload, joinPath(explorer.cwd, entry.name), e.ctrlKey);
-}
-
-/** 文件区空白落点 = 当前目录（行内 drop 已 stopPropagation） */
-function onBlankDragOver(e: DragEvent) {
-  if (!hasFilesPayload(e.dataTransfer!)) return;
-  e.preventDefault();
-  e.dataTransfer!.dropEffect = resolveDropMode(e.ctrlKey) === "copy" ? "copy" : "move";
-  dragOverDir.value = ".";
-}
-
-function onBlankDrop(e: DragEvent) {
-  if (!hasFilesPayload(e.dataTransfer!)) return;
-  e.preventDefault();
-  if (dragOverDir.value === ".") dragOverDir.value = null;
-  removeDragGhost();
-  const payload = readFilesPayload(e.dataTransfer!);
-  if (!payload) return;
-  emit("dropFiles", payload, explorer.cwd, e.ctrlKey);
-}
-
-/** 文件夹行拖拽命中高亮（hover 高亮语义；"." 代表空白区） */
-const dragOverDir = ref<string | null>(null);
 </script>
 
 <template>
@@ -588,12 +552,15 @@ const dragOverDir = ref<string | null>(null);
   <div
     class="relative min-h-full px-2 pb-3"
     :class="rubberActive && 'select-none'"
+    :data-drop-dir="inSearch ? undefined : explorer.cwd"
+    data-drop-kind="blank"
+    :data-drop-label="inSearch ? undefined : dropLabelOfDir(explorer.cwd)"
     @pointerdown="onContainerPointerDown"
     @dblclick="onBlankDblClick"
     @contextmenu.prevent="onBlankContextMenu($event)"
     @wheel="onWheel"
-    @dragover="onBlankDragOver"
-    @drop="onBlankDrop"
+    @files-drop="onBlankFilesDrop"
+    @files-hover-blank="onHoverBlank"
   >
     <!-- 列头：40 高、左距 24、底部分隔线，点击排序；右缘 4px 拖宽/双击自适应；右键勾选列显隐 -->
     <div
@@ -682,23 +649,23 @@ const dragOverDir = ref<string | null>(null);
               ? 'bg-row-active hover:bg-row-active-hover'
               : 'hover:bg-row-hover',
             isCutRow(entry) && 'opacity-40',
-            dragOverDir === entry.name && 'bg-row-active ring-1 ring-[var(--accent)]',
+            // 长按武装微抬；拖起后源行淡化 0.8（WinUI ListViewItemDragThemeOpacity）
+            fileDrag.armedKey === rowKey(entry) && 'file-row-armed',
+            fileDrag.phase === 'dragging' && fileDrag.names.includes(rowKey(entry)) && 'file-row-origin',
           ]"
           role="row"
           :data-row="rowKey(entry)"
+          :data-drop-dir="!inSearch && entry.kind === 'dir' ? joinPath(explorer.cwd, entry.name) : undefined"
+          :data-drop-kind="!inSearch && entry.kind === 'dir' ? 'folder' : undefined"
+          :data-drop-label="!inSearch && entry.kind === 'dir' ? entry.name : undefined"
           :aria-selected="explorer.isSelected(rowKey(entry))"
           tabindex="0"
-          :draggable="!inSearch"
           @click.stop="onRowClick(entry, $event)"
           @dblclick.stop="onRowDblClick(entry)"
           @contextmenu.stop.prevent="onRowContextMenu(entry, $event)"
           @keydown.enter="entry.kind === 'dir' && explorer.enter(entry.name)"
-          @dragstart="onRowDragStart(entry, $event)"
-          @drag="onRowDrag($event)"
-          @dragend="onRowDragEnd"
-          @dragover="onRowDragOver(entry, $event)"
-          @dragleave="onRowDragLeave(entry)"
-          @drop="onRowDrop(entry, $event)"
+          @files-drop="onRowFilesDrop(entry, $event)"
+          @files-hover-open="onRowHoverOpen(entry)"
         >
           <!-- 选中指示竖条（WinUI ListViewItemPresenter SelectionIndicator：3×16、1.5 圆角、左缘居中） -->
           <span

@@ -5,12 +5,7 @@ import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { listDir } from "@/api/ssh";
 import { useExplorer } from "@/stores/explorer";
 import { joinPath } from "@/utils/format";
-import {
-  hasFilesPayload,
-  readFilesPayload,
-  resolveDropMode,
-  type FilesDragPayload,
-} from "@/utils/dragDrop";
+import type { FilesDragPayload } from "@/utils/dragDrop";
 
 const props = defineProps<{ paneId: string }>();
 
@@ -148,33 +143,19 @@ onBeforeUnmount(() => {
   if (debounceTimer) clearTimeout(debounceTimer);
 });
 
-/** —— 行内拖拽落点（M7 步骤 4）：面包屑分段 = 移动/复制到该祖先目录（Explorer 惯例） —— */
+/** —— 行内拖拽落点：面包屑分段 = 移动/复制到该祖先目录（Explorer 惯例）；
+ *  悬停 1300ms 自动导航（Files NavigationToolbarViewModel _dragOverTimer）。
+ *  面包屑项无拖拽专属高亮（Files BreadcrumbBar.xaml 只有 Chevron/PointerOver/Pressed），反馈靠 caption —— */
 const emit = defineEmits<{
   dropFiles: [payload: FilesDragPayload, targetDir: string, ctrlKey: boolean];
 }>();
 
-const dragOverPath = ref<string | null>(null);
-
-function onCrumbDragOver(path: string, e: DragEvent) {
-  if (!hasFilesPayload(e.dataTransfer!)) return;
-  e.preventDefault();
-  e.stopPropagation();
-  e.dataTransfer!.dropEffect = resolveDropMode(e.ctrlKey) === "copy" ? "copy" : "move";
-  dragOverPath.value = path;
-}
-
-function onCrumbDragLeave(path: string) {
-  if (dragOverPath.value === path) dragOverPath.value = null;
-}
-
-function onCrumbDrop(path: string, e: DragEvent) {
-  if (!hasFilesPayload(e.dataTransfer!)) return;
-  e.preventDefault();
-  e.stopPropagation();
-  dragOverPath.value = null;
-  const payload = readFilesPayload(e.dataTransfer!);
-  if (!payload) return;
-  emit("dropFiles", payload, path, e.ctrlKey);
+function onCrumbFilesDrop(path: string, e: Event) {
+  const { payload, ctrlKey } = (e as CustomEvent).detail as {
+    payload: FilesDragPayload;
+    ctrlKey: boolean;
+  };
+  emit("dropFiles", payload, path, ctrlKey);
 }
 </script>
 
@@ -192,15 +173,14 @@ function onCrumbDrop(path: string, e: DragEvent) {
       <button
         type="button"
         class="flex h-8 shrink-0 items-center gap-1.5 rounded-[2px] pr-2 pl-3 text-sm transition-colors"
-        :class="[
-          explorer.cwd === '/' ? 'font-semibold text-ink' : 'text-dim hover:bg-fill-subtle hover:text-ink',
-          dragOverPath === '/' && 'bg-row-active ring-1 ring-[var(--accent)]',
-        ]"
+        :class="explorer.cwd === '/' ? 'font-semibold text-ink' : 'text-dim hover:bg-fill-subtle hover:text-ink'"
         title="/"
+        :data-drop-dir="explorer.cwd !== '/' ? '/' : undefined"
+        :data-drop-kind="explorer.cwd !== '/' ? 'breadcrumb' : undefined"
+        :data-drop-label="explorer.cwd !== '/' ? '/' : undefined"
         @click.stop="explorer.open('/')"
-        @dragover="onCrumbDragOver('/', $event)"
-        @dragleave="onCrumbDragLeave('/')"
-        @drop="onCrumbDrop('/', $event)"
+        @files-drop="onCrumbFilesDrop('/', $event)"
+        @files-hover-open="explorer.open('/')"
       >
         <HardDrive :size="14" class="shrink-0" />
         <span v-if="explorer.cwd === '/'">此电脑</span>
@@ -211,17 +191,16 @@ function onCrumbDrop(path: string, e: DragEvent) {
         <button
           type="button"
           class="h-8 shrink-0 rounded-[2px] px-2 text-sm whitespace-nowrap transition-colors"
-          :class="[
-            i === crumbs.length - 1
-              ? 'font-semibold text-ink'
-              : 'text-dim hover:bg-fill-subtle hover:text-ink',
-            dragOverPath === crumb.path && 'bg-row-active ring-1 ring-[var(--accent)]',
-          ]"
+          :class="i === crumbs.length - 1
+            ? 'font-semibold text-ink'
+            : 'text-dim hover:bg-fill-subtle hover:text-ink'"
           :title="crumb.path"
+          :data-drop-dir="i < crumbs.length - 1 ? crumb.path : undefined"
+          :data-drop-kind="i < crumbs.length - 1 ? 'breadcrumb' : undefined"
+          :data-drop-label="i < crumbs.length - 1 ? crumb.name : undefined"
           @click.stop="i < crumbs.length - 1 && explorer.open(crumb.path)"
-          @dragover="onCrumbDragOver(crumb.path, $event)"
-          @dragleave="onCrumbDragLeave(crumb.path)"
-          @drop="onCrumbDrop(crumb.path, $event)"
+          @files-drop="onCrumbFilesDrop(crumb.path, $event)"
+          @files-hover-open="explorer.open(crumb.path)"
         >
           {{ crumb.name }}
         </button>
