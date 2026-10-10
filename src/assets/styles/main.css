@@ -124,6 +124,11 @@
 }
 
 @theme inline {
+  /* hover 过渡基准 83ms（Files ToolbarButtonStyle.xaml:39 BrushTransition 0:0:0.083，
+     覆盖 Tailwind 默认 150ms——所有 transition-* 工具类走此变量；显式时长的
+     动画（弹层、折叠等）不受影响） */
+  --default-transition-duration: 83ms;
+
   --color-bg: var(--bg);
   --color-panel: var(--panel);
   --color-toolbar: var(--toolbar);
