@@ -16,8 +16,10 @@ import { syntaxHighlighting } from "@codemirror/language";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import Modal from "@/components/common/Modal.vue";
+import ResizeHandles from "@/components/common/ResizeHandles.vue";
 import EditorSearchWidget from "@/components/workspace/EditorSearchWidget.vue";
 import { createEditorSearch } from "@/composables/editorSearch";
+import { useFloatingResize } from "@/composables/floatingResize";
 import { useEditorStore } from "@/stores/editor";
 import { useSettingsStore } from "@/stores/settings";
 import { renderMarkdown } from "@/utils/markdown";
@@ -26,7 +28,7 @@ import { cmHighlight, cmTheme, loadLanguageExt } from "@/utils/editorLanguage";
 /**
  * 悬浮编辑窗：覆盖全页的模糊遮罩（Acrylic 层）+ 居中亚克力窗体
  * （半透明 surface + backdrop blur + 12 圆角 + 深影），从底部升起进场。
- * 右下角可拖拽调整大小，可最大化/还原；默认只读，「编辑」切换可写。
+ * 全边界（四边+四角）可拖拽调整大小，可最大化/还原；默认只读，「编辑」切换可写。
  * CodeMirror 6：行号 + 当前行高亮 + JetBrains Mono，语言包按扩展名懒加载。
  */
 
@@ -35,17 +37,16 @@ const editor = useEditorStore();
 /** 自绘查找/替换（G2）：状态与官方命令桥接，UI 为视口右上角悬浮卡 */
 const search = createEditorSearch();
 
-/** 窗体尺寸（px）；拖拽期间关闭过渡 */
-const size = ref({
-  w: Math.min(1080, Math.round(window.innerWidth * 0.86)),
-  h: Math.min(720, Math.round(window.innerHeight * 0.76)),
+/** 窗体尺寸/锚定（拖拽期间锁定左上角、关闭过渡）；宽 480–92vw / 高 280–90vh */
+const { size, pos, dragging, startResize, resetAnchor } = useFloatingResize({
+  initial: {
+    w: Math.min(1080, Math.round(window.innerWidth * 0.86)),
+    h: Math.min(720, Math.round(window.innerHeight * 0.76)),
+  },
+  minW: 480,
+  minH: 280,
 });
-const dragging = ref(false);
 const confirmClose = ref(false);
-/** resize 锁定的左上角位置（相对遮罩的 absolute 坐标；null = flex 居中常态）。
- *  flex 居中下宽度 +d 会让右缘仅右移 d/2（左缘同时左移 d/2），右下角句柄只走一半——
- *  resize 期间切换为左上角锚定的绝对定位，宽度增量全额作用于右缘，句柄精确跟手 */
-const pos = ref<{ x: number; y: number } | null>(null);
 
 /** 语言/只读按需重配 */
 const languageComp = new Compartment();
@@ -131,7 +132,7 @@ onBeforeUnmount(destroyEditor);
 watch(
   () => editor.open,
   (open) => {
-    pos.value = null;
+    resetAnchor();
     if (open && !editor.unsupported) {
       void mountEditor();
     } else {
@@ -189,39 +190,6 @@ watch(
     }
   },
 );
-
-/** 右下角拖拽调整窗体大小（宽 480–92vw / 高 280–90vh）；
- *  拖拽开始即锁定左上角（absolute 定位），拖多少走多少 */
-function onResizeDown(e: PointerEvent) {
-  if (editor.maximized) return;
-  dragging.value = true;
-  const win = (e.currentTarget as HTMLElement).closest('[role="dialog"]');
-  if (win) {
-    const rect = win.getBoundingClientRect();
-    // 遮罩 fixed inset-0 top-9：absolute 子元素相对其 padding box（视口顶部下移 36px）
-    pos.value = { x: rect.left, y: rect.top - 36 };
-  }
-  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  const startX = e.clientX;
-  const startY = e.clientY;
-  const startW = size.value.w;
-  const startH = size.value.h;
-  const onMove = (ev: PointerEvent) => {
-    const maxW = Math.round(window.innerWidth * 0.92);
-    const maxH = Math.round(window.innerHeight * 0.9);
-    size.value = {
-      w: Math.min(maxW, Math.max(480, startW + ev.clientX - startX)),
-      h: Math.min(maxH, Math.max(280, startH + ev.clientY - startY)),
-    };
-  };
-  const onUp = () => {
-    dragging.value = false;
-    window.removeEventListener("pointermove", onMove);
-    window.removeEventListener("pointerup", onUp);
-  };
-  window.addEventListener("pointermove", onMove);
-  window.addEventListener("pointerup", onUp);
-}
 
 /** 关闭请求：脏状态先确认 */
 function requestClose() {
@@ -436,15 +404,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onGlobalKeydown, tru
         v-show="!editor.loading && !editor.unsupported && editor.previewMode === 'source'"
         :search="search"
       />
-
-      <!-- 右下角拖拽调整大小 -->
-      <div
-        v-if="!editor.maximized && !editor.unsupported"
-        class="absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize"
-        title="拖拽调整大小"
-        @pointerdown="onResizeDown"
-      />
     </div>
+
+        <!-- 全边界拖拽调整大小（四边 + 四角） -->
+        <ResizeHandles v-if="!editor.maximized && !editor.unsupported" @down="startResize" />
         </div>
       </div>
     </Transition>

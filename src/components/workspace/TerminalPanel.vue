@@ -5,24 +5,29 @@ import { Terminal, type ITheme } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 
+import ResizeHandles from "@/components/common/ResizeHandles.vue";
+import { useFloatingResize } from "@/composables/floatingResize";
 import { useTerminalStore } from "@/stores/terminal";
 import { useSettingsStore } from "@/stores/settings";
 
 /**
  * 悬浮终端窗（与编辑器同款形态）：全页模糊遮罩（避开标题栏）+ 居中亚克力窗体，
- * 自底部升起。终端习惯宽扁比例，默认 86vw × 64vh，右下角可拖拽调整大小。
- * xterm.js 双向转发：onData → ssh_terminal_write；terminal://data → xterm.write；
- * fit addon 自适应窗体尺寸，变化时同步 ssh_terminal_resize；主题跟随明暗。
+ * 自底部升起。终端习惯宽扁比例，默认 86vw × 64vh，全边界（四边+四角）可拖拽
+ * 调整大小。xterm.js 双向转发：onData → ssh_terminal_write；terminal://data →
+ * xterm.write；fit addon 自适应窗体尺寸，变化时同步 ssh_terminal_resize；主题跟随明暗。
  */
 
 const terminalStore = useTerminalStore();
 
-/** 窗体尺寸（px）；拖拽期间关闭过渡 */
-const size = ref({
-  w: Math.min(1024, Math.round(window.innerWidth * 0.86)),
-  h: Math.min(520, Math.round(window.innerHeight * 0.64)),
+/** 窗体尺寸/锚定（拖拽期间锁定左上角、关闭过渡）；宽 480–92vw / 高 240–90vh */
+const { size, pos, dragging, startResize, resetAnchor } = useFloatingResize({
+  initial: {
+    w: Math.min(1024, Math.round(window.innerWidth * 0.86)),
+    h: Math.min(520, Math.round(window.innerHeight * 0.64)),
+  },
+  minW: 480,
+  minH: 240,
 });
-const dragging = ref(false);
 const maximized = ref(false);
 const host = ref<HTMLElement | null>(null);
 
@@ -162,11 +167,14 @@ function destroyXterm() {
 
 onBeforeUnmount(destroyXterm);
 
-// 窗口关闭 → 销毁 xterm；terminalId 就绪 → 挂载
+// 窗口关闭 → 销毁 xterm + 尺寸锚定复位居中；terminalId 就绪 → 挂载
 watch(
   () => terminalStore.open,
   (open) => {
-    if (!open) destroyXterm();
+    if (!open) {
+      destroyXterm();
+      resetAnchor();
+    }
   },
 );
 // terminalId 就绪 → 挂载 xterm。immediate 兜底：openIn 的 invoke 若快于面板
@@ -188,32 +196,6 @@ watch(
     terminalStore.setSink(sinkData, sinkExit);
   },
 );
-
-/** 右下角拖拽调整窗体大小（宽 480–92vw / 高 240–90vh） */
-function onResizeDown(e: PointerEvent) {
-  if (maximized.value) return;
-  dragging.value = true;
-  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  const startX = e.clientX;
-  const startY = e.clientY;
-  const startW = size.value.w;
-  const startH = size.value.h;
-  const onMove = (ev: PointerEvent) => {
-    const maxW = Math.round(window.innerWidth * 0.92);
-    const maxH = Math.round(window.innerHeight * 0.9);
-    size.value = {
-      w: Math.min(maxW, Math.max(480, startW + ev.clientX - startX)),
-      h: Math.min(maxH, Math.max(240, startH + ev.clientY - startY)),
-    };
-  };
-  const onUp = () => {
-    dragging.value = false;
-    window.removeEventListener("pointermove", onMove);
-    window.removeEventListener("pointerup", onUp);
-  };
-  window.addEventListener("pointermove", onMove);
-  window.addEventListener("pointerup", onUp);
-}
 
 function toggleMaximized() {
   maximized.value = !maximized.value;
@@ -254,7 +236,9 @@ watch(
             width: maximized ? 'auto' : `${size.w}px`,
             height: maximized ? 'auto' : `${size.h}px`,
             inset: maximized ? '20px' : undefined,
-            position: maximized ? 'absolute' : undefined,
+            position: maximized || pos ? 'absolute' : undefined,
+            left: !maximized && pos ? `${pos.x}px` : undefined,
+            top: !maximized && pos ? `${pos.y}px` : undefined,
             transition: dragging ? 'none' : 'width 0.15s ease, height 0.15s ease',
             background: 'color-mix(in srgb, var(--surface-solid) 84%, transparent)',
             backdropFilter: 'blur(20px) saturate(1.15)',
@@ -306,15 +290,10 @@ watch(
               class="absolute inset-0 overflow-hidden rounded-md px-1.5 pb-1"
               :style="{ background: currentTheme().background }"
             />
-
-            <!-- 右下角拖拽调整大小 -->
-            <div
-              v-if="!maximized"
-              class="absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize"
-              title="拖拽调整大小"
-              @pointerdown="onResizeDown"
-            />
           </div>
+
+          <!-- 全边界拖拽调整大小（四边 + 四角） -->
+          <ResizeHandles v-if="!maximized" @down="startResize" />
         </div>
       </div>
     </Transition>
