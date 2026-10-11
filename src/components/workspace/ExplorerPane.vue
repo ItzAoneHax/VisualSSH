@@ -1070,7 +1070,11 @@ function onKeydown(e: KeyboardEvent) {
       class="pointer-events-none absolute inset-0 rounded-lg"
       :style="{
         boxShadow: 'var(--card-shadow)',
-        clipPath: 'inset(6px -24px -24px -24px)',
+        // 凹形裁剪：顶边中间段 6px 内豁免（非激活标签下的卡顶无影，ThemeShadow
+        // top-lit 语义），但左右各 12px 侧缘竖带自顶起保留阴影——侧缘线（半透明
+        // --line）底下的影须与激活标签侧影连续，否则熔接缝两侧线色一深一浅跳变
+        clipPath:
+          'polygon(-24px -24px, 12px -24px, 12px 6px, calc(100% - 12px) 6px, calc(100% - 12px) -24px, calc(100% + 24px) -24px, calc(100% + 24px) calc(100% + 24px), -24px calc(100% + 24px))',
       }"
       aria-hidden="true"
     />
