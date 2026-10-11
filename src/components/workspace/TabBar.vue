@@ -507,12 +507,17 @@ function duplicateTab(tab: WorkspaceTab) {
         <X :size="12" />
       </button>
 
-      <!-- 非激活标签浮起投影（用户真机反馈标签缺浮起感）：shadow4 档（Fluent 小浮层），
-           底部 8px 豁免——阴影不越过标签盒底打在熔接区/卡顶上；激活标签熔接一体不投影 -->
+      <!-- 激活标签浮起投影（用户定案：仅激活标签有影，非激活平贴）：与下方卡是
+           连体浮起体——用卡同档 shadow8（顶/侧缘与卡投影连续）；底部 8px 豁免
+           + clip-path 底缘零外扩（inset 负值只放行上/左/右）：熔接处是连体内部，
+           阴影向下扩散尾部不得落入豁免带或越过标签底打在卡面 -->
       <span
-        v-if="tab.id !== workspace.activeTabId"
+        v-if="tab.id === workspace.activeTabId"
         class="pointer-events-none absolute inset-x-0 top-0 bottom-[8px] rounded-t-[8px]"
-        :style="{ boxShadow: 'var(--tab-shadow)' }"
+        :style="{
+          boxShadow: 'var(--card-shadow)',
+          clipPath: 'inset(-12px -12px 0px -12px)',
+        }"
         aria-hidden="true"
       />
       <!-- 标签间分隔符（TabViewItemSeparator=DividerStrokeColorDefault 1px、上下缩进 8；
