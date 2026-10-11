@@ -761,15 +761,15 @@ const ctxMenuItems = computed<MenuItem[]>(() => {
       },
     );
   }
+  // 一级行余下三项（重命名/删除/属性）；原 sep2/sep3/sep4 的分组随列表项入一级行
+  // 大多消失——分隔线只保留 download 组与 chmod 之间一条（渲染层另有 TrimSeparators 防御）
   items.push(
-    { key: "sep2", label: "", separator: true },
     { key: "rename", label: "重命名", icon: Pencil, primary: true, accelerator: "F2" },
     { key: "delete", label: "删除", icon: Trash2, primary: true, accelerator: "Delete", danger: true },
-    { key: "sep3", label: "", separator: true },
-    { key: "chmod", label: "修改权限", icon: Lock },
-    { key: "sep4", label: "", separator: true },
-    // 属性进一级行（Files OpenProperties IsPrimary；Alt+Enter 未绑定不标 accelerator）
+    // 属性（Files OpenProperties IsPrimary；Alt+Enter 未绑定不标 accelerator）
     { key: "properties", label: "属性", icon: Info, primary: true },
+    { key: "sep2", label: "", separator: true },
+    { key: "chmod", label: "修改权限", icon: Lock },
   );
   return items;
 });
@@ -1057,14 +1057,23 @@ function onKeydown(e: KeyboardEvent) {
 
 <template>
   <!-- 根容器承载整组卡（地址行卡+文件区卡）的浮起投影：Files 的投影挂在一张大卡
-       （ModernShellPage RootGrid，含内部工具栏），此处两卡同间隙并集=该大卡矩形，
-       容器投影=沿并集外周（缝隙内部无影）；8px 圆角仅整形阴影（与卡的圆角同径） -->
+       （ModernShellPage RootGrid，含内部工具栏），此处两卡同间隙并集=该大卡矩形。
+       阴影画在独立覆盖层并沿顶边整条豁免（clip-path 顶裁 6px）：ThemeShadow 是
+       top-lit 3D 投影只投向下方内容，顶边本就无影——平面 box-shadow 若不裁会在
+       标签条（含透明背景的非激活标签）上透出残留线；缝隙内部无影（阴影只画盒外） -->
   <div
-    class="flex min-h-0 min-w-0 flex-1 flex-col gap-1 rounded-lg"
-    :style="{ boxShadow: 'var(--card-shadow)' }"
+    class="relative flex min-h-0 min-w-0 flex-1 flex-col gap-1"
     @pointerdown="activatePane"
     @contextmenu="activatePane"
   >
+    <span
+      class="pointer-events-none absolute inset-0 rounded-lg"
+      :style="{
+        boxShadow: 'var(--card-shadow)',
+        clipPath: 'inset(6px -24px -24px -24px)',
+      }"
+      aria-hidden="true"
+    />
     <!-- 地址行卡（Win11：后退/前进/刷新在地址栏左侧）；#actions 插槽承载搜索框与全局按钮。
         单栏时本卡承接上方选中标签的熔接：顶边透明，可视线由主列熔接顶线绘制（带标签缺口）；
         选中首标签时顶左角转直角（左侧外框与标签侧边连续成竖线） -->

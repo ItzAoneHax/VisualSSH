@@ -975,13 +975,16 @@ watch(
       class="relative flex h-8 shrink-0 items-center justify-between border-t px-3 text-xs text-dim"
       :style="{ borderColor: 'var(--line)' }"
     >
+      <!-- 设置（Files MainPage.xaml:306-330：SidebarView.Footer 的 SidebarItem 行=32 高、
+           图标 16、内 Grid 圆角 4，整行可点）：命中区=侧栏宽度段整宽（14rem-左 padding）、
+           撑满状态栏行高——此前 h-6 内容宽按钮点击区域过小（用户真机反馈） -->
       <button
         type="button"
-        class="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-[2px] px-1.5 text-xs text-ink transition-colors hover:bg-fill-subtle"
+        class="flex h-8 w-[calc(14rem-12px)] shrink-0 items-center gap-1.5 rounded-[4px] px-1.5 text-xs text-ink transition-colors hover:bg-fill-subtle"
         title="设置"
         @click="settings.openSettings()"
       >
-        <Settings :size="14" class="text-dim" />
+        <Settings :size="16" class="text-dim" />
         <span class="truncate">设置</span>
       </button>
       <span

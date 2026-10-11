@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Component } from "vue";
 
-import { onBeforeUnmount, onMounted } from "vue";
+import { computed, onBeforeUnmount, onMounted } from "vue";
 
 export interface MenuItem {
   key: string;
@@ -22,7 +22,7 @@ export interface MenuItem {
   accelerator?: string;
 }
 
-defineProps<{
+const props = defineProps<{
   open: boolean;
   items: MenuItem[];
 }>();
@@ -35,6 +35,17 @@ const emit = defineEmits<{
 function onKeydown(e: KeyboardEvent) {
   if (e.key === "Escape") emit("close");
 }
+
+/** 折叠连续分隔线并去首尾（Files FastContextFlyout.TrimSeparators 同款防御） */
+const listItems = computed(() => {
+  const out: MenuItem[] = [];
+  for (const item of props.items) {
+    if (item.separator && (out.length === 0 || out[out.length - 1].separator)) continue;
+    out.push(item);
+  }
+  while (out.length && out[out.length - 1].separator) out.pop();
+  return out;
+});
 
 onMounted(() => window.addEventListener("keydown", onKeydown));
 onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
@@ -56,7 +67,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           border: '1px solid var(--stroke-flyout)',
         }"
       >
-        <template v-for="item in items" :key="item.key">
+        <template v-for="item in listItems" :key="item.key">
           <div v-if="item.separator" class="mx-2 my-1 h-px" :style="{ background: 'var(--line)' }" />
           <button
             v-else

@@ -507,6 +507,14 @@ function duplicateTab(tab: WorkspaceTab) {
         <X :size="12" />
       </button>
 
+      <!-- 非激活标签浮起投影（用户真机反馈标签缺浮起感）：shadow4 档（Fluent 小浮层），
+           底部 8px 豁免——阴影不越过标签盒底打在熔接区/卡顶上；激活标签熔接一体不投影 -->
+      <span
+        v-if="tab.id !== workspace.activeTabId"
+        class="pointer-events-none absolute inset-x-0 top-0 bottom-[8px] rounded-t-[8px]"
+        :style="{ boxShadow: 'var(--tab-shadow)' }"
+        aria-hidden="true"
+      />
       <!-- 标签间分隔符（TabViewItemSeparator=DividerStrokeColorDefault 1px、上下缩进 8；
            hover/按下让位 Opacity 0，选中态保持——TabBarStyles.xaml:127-134,226,237） -->
       <span

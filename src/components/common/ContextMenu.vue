@@ -22,9 +22,21 @@ const MENU_ITEM_HEIGHT = 36;
 /** 一级行高：38 按钮 + 上下 Margin 2 = 42，行后分隔线 ~9（MenuFlyoutSeparator） */
 const PRIMARY_ROW_HEIGHT = 51;
 
+/** 折叠连续分隔线并去首尾（Files FastContextFlyout.TrimSeparators 同款防御：
+ *  primary 项抽进一级行后原分组可能整组消失，留下相邻/悬挂分隔线） */
+function trimSeparators(items: MenuItem[]): MenuItem[] {
+  const out: MenuItem[] = [];
+  for (const item of items) {
+    if (item.separator && (out.length === 0 || out[out.length - 1].separator)) continue;
+    out.push(item);
+  }
+  while (out.length && out[out.length - 1].separator) out.pop();
+  return out;
+}
+
 /** 一级图标命令行与列表项分离渲染（FastContextFlyout.Build：IsPrimary 过滤） */
 const primaryItems = computed(() => props.items.filter((i) => i.primary && !i.separator));
-const listItems = computed(() => props.items.filter((i) => !i.primary));
+const listItems = computed(() => trimSeparators(props.items.filter((i) => !i.primary)));
 
 /** 靠近屏幕右/下边缘时向内收（MenuFlyout 定位策略的简化版）。
  *  向上开（放不下时）一级行沉到菜单底部贴近指针（FastContextFlyout.FinalizePrimaryRowPosition：
