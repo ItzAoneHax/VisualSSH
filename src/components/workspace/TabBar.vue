@@ -521,8 +521,12 @@ function duplicateTab(tab: WorkspaceTab) {
         aria-hidden="true"
       />
       <!-- 标签间分隔符（TabViewItemSeparator=DividerStrokeColorDefault 1px、上下缩进 8；
-           hover/按下让位 Opacity 0，选中态保持——TabBarStyles.xaml:127-134,226,237） -->
+           hover/按下让位 Opacity 0——TabBarStyles.xaml:127-134,226,237）。仅非激活标签：
+           Files 的 TabSeparator 在模板中先于 TabContainer 绘制，选中标签的不透明背景
+           把它盖住=视觉上激活标签无分隔线（此前画在背景之上，激活标签右缘露出
+           双线且 hover 消失，用户真机指出） -->
       <span
+        v-if="tab.id !== workspace.activeTabId"
         class="pointer-events-none absolute top-2 right-0 bottom-2 w-px opacity-100 group-hover:opacity-0 group-active:opacity-0"
         :style="{ background: 'var(--line)' }"
         aria-hidden="true"
