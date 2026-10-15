@@ -10,6 +10,7 @@ import {
   House,
   PanelRight,
   PinOff,
+  Plus,
   ScrollText,
   Search,
   Settings,
@@ -31,7 +32,6 @@ import TransferCenter from "@/components/workspace/TransferCenter.vue";
 import { useConnectionsStore } from "@/stores/connections";
 import { useClipboardStore } from "@/stores/clipboard";
 import { useExplorer } from "@/stores/explorer";
-import { useExitGuardStore } from "@/stores/exitGuard";
 import { usePinnedStore } from "@/stores/pinned";
 import { useSettingsStore } from "@/stores/settings";
 import { useTerminalStore } from "@/stores/terminal";
@@ -65,7 +65,6 @@ const clip = useClipboardStore();
 const terminalStore = useTerminalStore();
 const settings = useSettingsStore();
 const pinnedStore = usePinnedStore();
-const exitGuard = useExitGuardStore();
 
 /** D4 断线横幅数据：非正常连接态的连接（reconnecting/disconnected/failed） */
 const brokenConnections = computed(() =>
@@ -77,6 +76,12 @@ const activeTab = computed(() => workspace.activeTab);
 /** 活动标签的连接（窗格共享标签的连接；状态栏/侧栏/终端按钮都用它） */
 const activeConn = computed(
   () => connections.byId[activeTab.value?.connectionId ?? ""] ?? null,
+);
+/** 状态栏连接态：零标签时回退「最近连接」（连接仍在后台运行，显示不断）；
+ *  仅展示用——拖放/终端等功能路径仍走 activeConn（无标签时必须为 null，
+ *  空态页不接受落放） */
+const statusConn = computed(
+  () => activeConn.value ?? connections.active ?? null,
 );
 /** 活动窗格的浏览器状态（状态栏统计/终端打开/拖放上传用） */
 const activeExplorer = computed(() =>
@@ -469,8 +474,7 @@ async function onKeydown(e: KeyboardEvent) {
     e.preventDefault();
     const tab = activeTab.value;
     if (!tab) return;
-    // 关闭最后一个标签（离开语义）前经退出保护确认（C3）
-    if (workspace.tabs.length === 1 && !(await exitGuard.request())) return;
+    // 关最后一个标签 = 空态页（连接/传输/终端均后台态不受影响），无「离开」确认
     workspace.closeTab(tab.id, activeExplorer.value?.cwd);
   } else if (key === "t" && e.shiftKey) {
     e.preventDefault();
@@ -893,6 +897,22 @@ watch(
           </div>
         </template>
 
+        <!-- 空态：标签全部关闭（关最后一个标签不再有确认弹窗——应用常驻后台，
+            并没有「离开」）。连接保持运行：传输/MCP/终端会话照旧，状态栏仍显示
+            连接态；+ 菜单或本页按钮重开标签，主页按钮断开连接 -->
+        <div
+          v-else
+          class="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 text-center"
+        >
+          <FolderOpen :size="40" class="mb-1 text-faint" aria-hidden="true" />
+          <p class="text-sm font-medium">没有打开的标签</p>
+          <p class="text-xs text-faint">连接仍在后台运行，传输与终端会话不受影响</p>
+          <button type="button" class="btn-secondary mt-3" @click="onNewTabRequest()">
+            <Plus :size="14" />
+            新建标签
+          </button>
+        </div>
+
         <!-- 信息窗格（底部模式）：主列内、状态栏上方；分隔条同分屏视觉（拖拽/双击恢复默认） -->
         <template v-if="infoPaneVisible && infoPosition === 'bottom'">
           <div
@@ -914,8 +934,10 @@ watch(
         <!-- 熔接顶线：宽度对齐工具条卡本体（left-2.5/right-2 镜像主列 pl-2.5/pr-2），
             top-0 精确落在卡片顶边框行（卡片顶边透明让位，无双线）；选中标签下方留
             缺口（±4px 供标签底部凹弧切线段对接，首标签时左侧无段，见 measureFusion）。
-            两端 8px SVG 圆弧补全卡片被 borderTopColor 透明截掉的上半截圆角 -->
+            两端 8px SVG 圆弧补全卡片被 borderTopColor 透明截掉的上半截圆角；
+            标签全关时卡片不渲染，线失去承载一并隐藏（空态页顶上不悬孤立线） -->
         <div
+          v-if="activeTab"
           ref="fusionRef"
           data-fusion-line
           class="pointer-events-none absolute left-2.5 right-2 top-0 z-10 h-px"
@@ -1029,17 +1051,17 @@ watch(
           </span>
         </span>
         <span
-          v-if="activeConn"
+          v-if="statusConn"
           class="flex min-w-0 items-baseline gap-1.5"
-          :title="`${activeConn.profile.username}@${activeConn.profile.host}`"
+          :title="`${statusConn.profile.username}@${statusConn.profile.host}`"
         >
           <span class="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-live" aria-hidden="true" />
-          <span class="truncate font-medium">{{ activeConn.alias }}</span>
+          <span class="truncate font-medium">{{ statusConn.alias }}</span>
           <span class="truncate font-mono text-[11px]">
-            {{ activeConn.profile.username }}@{{ activeConn.profile.host }}
+            {{ statusConn.profile.username }}@{{ statusConn.profile.host }}
           </span>
         </span>
-        <span v-if="activeConn" class="shrink-0 font-mono">{{ activeConn.latencyMs }} ms</span>
+        <span v-if="statusConn" class="shrink-0 font-mono">{{ statusConn.latencyMs }} ms</span>
       </span>
     </footer>
 

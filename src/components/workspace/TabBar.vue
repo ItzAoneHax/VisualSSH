@@ -5,7 +5,6 @@ import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import ContextMenu from "@/components/common/ContextMenu.vue";
 import type { MenuItem } from "@/components/common/DropdownMenu.vue";
 import { useConnectionsStore } from "@/stores/connections";
-import { useExitGuardStore } from "@/stores/exitGuard";
 import { useExplorer } from "@/stores/explorer";
 import { useWorkspaceStore, type WorkspaceTab } from "@/stores/workspace";
 import {
@@ -42,7 +41,6 @@ const emit = defineEmits<{
 
 const workspace = useWorkspaceStore();
 const connections = useConnectionsStore();
-const exitGuard = useExitGuardStore();
 
 function tooltipOf(tab: WorkspaceTab): string {
   const conn = connections.byId[tab.connectionId];
@@ -50,10 +48,10 @@ function tooltipOf(tab: WorkspaceTab): string {
   return `${conn ? `${conn.profile.username}@${conn.profile.host}` : tab.alias} — ${cwd}`;
 }
 
-/** 关闭（中键/关闭按钮）：带当前目录入重开栈；
- *  关闭最后一个标签（离开语义）前经退出保护确认（C3） */
-async function onCloseRequest(tab: WorkspaceTab) {
-  if (workspace.tabs.length === 1 && !(await exitGuard.request())) return;
+/** 关闭（中键/关闭按钮）：带当前目录入重开栈。关最后一个标签 = 回到空态页
+ *  （连接/传输/终端全是后台态不受影响），无需「离开」保护——那套确认只适用
+ *  于真正取消传输的路径：主页断开连接 / 托盘退出（exitGuard） */
+function onCloseRequest(tab: WorkspaceTab) {
   workspace.closeTab(tab.id, useExplorer(tab.activePaneId).cwd);
 }
 
