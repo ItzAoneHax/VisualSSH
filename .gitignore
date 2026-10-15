@@ -21,3 +21,6 @@ Thumbs.db
 # 根目录单文件产物（npm run exe 生成）
 /VisualSSH.exe
 /*.exe
+
+# 运行中换版改名产物（pack-exe 自动腾位）
+/VisualSSH.exe.old*
