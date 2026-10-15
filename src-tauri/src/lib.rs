@@ -27,6 +27,23 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // 换版残留清理：npm run exe 在应用运行中交付时把旧 exe 改名为
+            // <exe>.old[N] 腾位（Windows 运行中的 exe 不能覆盖但可改名）。
+            // 启动时尽力删除同目录残留——仍被旧进程占用的会失败，静默留给下次。
+            if let Ok(exe) = std::env::current_exe() {
+                let prefix = exe
+                    .file_name()
+                    .map(|n| format!("{}.old", n.to_string_lossy()));
+                if let (Some(prefix), Some(dir)) = (prefix, exe.parent()) {
+                    if let Ok(entries) = std::fs::read_dir(dir) {
+                        for entry in entries.flatten() {
+                            if entry.file_name().to_string_lossy().starts_with(&prefix) {
+                                let _ = std::fs::remove_file(entry.path());
+                            }
+                        }
+                    }
+                }
+            }
             // MCP hub：与前端启动解耦（stdio shim 可能只等这个端口）
             let (_ctx, hub) = commands::mcp::build_ctx(app.handle().clone());
             let hub_enabled = hub.ctx.config.read().unwrap().enabled;
