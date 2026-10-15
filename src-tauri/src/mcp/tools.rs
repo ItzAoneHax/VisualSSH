@@ -428,7 +428,7 @@ fn translate_pure(c: &str) -> Option<String> {
             format!("执行容器操作：{}", operands.join(" "))
         }
         "curl" | "wget" => format!("从网络下载（{}）", operands.join(" ")),
-        "cat" | "head" | "tail" | "less" | "grep" | "awk" | "sed" | "sort" | "wc" | "find" | "ls" | "du" | "df" | "ps" | "top" | "free" | "uname" | "whoami" | "id" | "date" | "echo" | "which" | "stat" | "tail" => {
+        "cat" | "head" | "tail" | "less" | "grep" | "awk" | "sed" | "sort" | "wc" | "find" | "ls" | "du" | "df" | "ps" | "top" | "free" | "uname" | "whoami" | "id" | "date" | "echo" | "which" | "stat" => {
             return None; // 只读类命令不值得逐个翻译——上层回退原文
         }
         _ => return None,

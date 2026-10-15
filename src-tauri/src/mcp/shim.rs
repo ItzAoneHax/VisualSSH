@@ -67,20 +67,31 @@ async fn wait_hub(port: u16, timeout: Duration) -> bool {
 /// hub 的探测/拉起惰性化：首次请求时进行（OnceCell 保证并发只做一次）。
 #[derive(Clone)]
 struct HttpRpc {
-    hub_ready: std::sync::Arc<tokio::sync::OnceCell<()>>,
+    /// 就绪状态可重置（GUI 关闭后失效）：包一层 async Mutex 拿 &mut
+    /// （Arc 直接共享无 &mut；std Mutex 不能跨 get_or_try_init 的 await 持有）
+    hub_ready: std::sync::Arc<tokio::sync::Mutex<tokio::sync::OnceCell<()>>>,
+}
+
+/// 单次 HTTP 请求的失败：connect 标记传输层连不上（hub 进程不在了），
+/// 与「连上了但请求/响应出错」区分——前者值得重置就绪缓存重新拉起。
+struct HttpFail {
+    message: String,
+    connect: bool,
 }
 
 impl HttpRpc {
     fn new() -> Self {
         Self {
-            hub_ready: std::sync::Arc::new(tokio::sync::OnceCell::new()),
+            hub_ready: std::sync::Arc::new(tokio::sync::Mutex::new(
+                tokio::sync::OnceCell::new(),
+            )),
         }
     }
 
     /// 确保 GUI 主进程 hub 在线；不通则拉起主程序并等待就绪。
     async fn ensure_hub(&self, port: u16) -> Result<(), String> {
-        self.hub_ready
-            .get_or_try_init(|| async move {
+        let cell = self.hub_ready.lock().await;
+        cell.get_or_try_init(|| async move {
                 if wait_hub(port, Duration::ZERO).await {
                     return Ok(());
                 }
@@ -102,38 +113,79 @@ impl HttpRpc {
     }
 
     async fn request(&self, port: u16, token: &str, path: &str, body: Value) -> Result<Value, String> {
+        self.ensure_hub(port).await?;
+        match self.post(port, token, path, &body).await {
+            Ok(v) => Ok(v),
+            // OnceCell 缓存的就绪状态已失效（GUI 被关闭）：重置后重新
+            // 探测/拉起一次，成功则重放请求——shim 不会因 GUI 重启而报废
+            Err(e) if e.connect => {
+                self.hub_ready.lock().await.take();
+                self.ensure_hub(port).await?;
+                self.post(port, token, path, &body).await.map_err(|e| e.message)
+            }
+            Err(e) => Err(e.message),
+        }
+    }
+
+    async fn post(
+        &self,
+        port: u16,
+        token: &str,
+        path: &str,
+        body: &Value,
+    ) -> Result<Value, HttpFail> {
         use http_body_util::{BodyExt, Full};
         use hyper::body::Bytes;
         use hyper_util::client::legacy::Client;
         use hyper_util::rt::TokioExecutor;
 
-        self.ensure_hub(port).await?;
-
         let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
         let uri: hyper::Uri = format!("http://127.0.0.1:{port}{path}")
             .parse()
-            .map_err(|e| format!("构造请求失败: {e}"))?;
-        let payload =
-            Full::new(Bytes::from(serde_json::to_vec(&body).map_err(|e| e.to_string())?));
+            .map_err(|e| HttpFail {
+                message: format!("构造请求失败: {e}"),
+                connect: false,
+            })?;
+        let payload = Full::new(
+            Bytes::from(serde_json::to_vec(body).map_err(|e| HttpFail {
+                message: e.to_string(),
+                connect: false,
+            })?),
+        );
         let req = hyper::Request::builder()
             .method(hyper::Method::POST)
             .uri(uri)
             .header("content-type", "application/json")
             .header("x-visualssh-token", token)
             .body(payload)
-            .map_err(|e| format!("构造请求失败: {e}"))?;
-        let res = client.request(req).await.map_err(|e| format!("请求 hub 失败: {e}"))?;
+            .map_err(|e| HttpFail {
+                message: format!("构造请求失败: {e}"),
+                connect: false,
+            })?;
+        let res = client.request(req).await.map_err(|e| HttpFail {
+            connect: e.is_connect(),
+            message: format!("请求 hub 失败: {e}"),
+        })?;
         let status = res.status();
         let bytes = res
             .into_body()
             .collect()
             .await
-            .map_err(|e| format!("读取响应失败: {e}"))?
+            .map_err(|e| HttpFail {
+                message: format!("读取响应失败: {e}"),
+                connect: false,
+            })?
             .to_bytes();
         if !status.is_success() {
-            return Err(format!("hub 返回 {}: {}", status, String::from_utf8_lossy(&bytes)));
+            return Err(HttpFail {
+                message: format!("hub 返回 {}: {}", status, String::from_utf8_lossy(&bytes)),
+                connect: false,
+            });
         }
-        serde_json::from_slice(&bytes).map_err(|e| format!("响应解析失败: {e}"))
+        serde_json::from_slice(&bytes).map_err(|e| HttpFail {
+            message: format!("响应解析失败: {e}"),
+            connect: false,
+        })
     }
 }
 
