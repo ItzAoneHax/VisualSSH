@@ -508,20 +508,29 @@ function duplicateTab(tab: WorkspaceTab) {
       </button>
 
       <!-- 激活标签浮起投影（用户定案：仅激活标签有影，非激活平贴）：与下方卡是
-           连体浮起体——用卡同档 shadow8（顶/侧缘与卡投影连续）；clip 凹形：
-           底部中间段止于挂载层底（=缝上 8px，熔接缝是连体内部无影），左右各
-           12px 侧缘竖带下延 8px 到缝——侧缘线底下的影与卡侧影无缝衔接（整条
-           豁免会让半透明 --line 线在缝两侧底色一深一浅，用户真机指出色差）。
+           连体浮起体——用卡同档 shadow8（顶/侧缘与卡投影连续）。挂载盒=标签
+           border box（-left/right-px 外扩、bottom-0 直落到缝）：box-shadow 只画
+           盒外，盒内（标签面与线列）永无影；polygon 底边=100%=缝，盒底以下的
+           下坠阴影整体裁掉，一分不漏到卡面（缝是连体内部）。轮廓外侧 12px 环
+           影柱沿直边全强落到缝——首标签左缘无凹弧且左线跨缝（bottom:-1px），
+           环与下卡侧环在缝两侧同强衔接，半透明线跨缝不跳色（ac15ffe 目标）；
+           右缘恒有凹弧、i>0 左缘也有——矩形环跟随不了凹弧，在凹弧外侧留 5px
+           方形缺口，环影止于凹弧顶交给凹弧（pre-ac15ffe 观感）。
+           （ac15ffe 曾把 12px 宽侧带连影带面下延到缝——盒底以下向外扩散的阴影
+           横跨带宽糊在标签两角=楔形暗斑，用户真机抓出；6f3bab5 的挂载盒上收
+           8px 又使环影柱在缝上断柱变弱，均废。）
            挂载层左右各外扩 1px 到 border box：absolute 包含块是 padding box，
            不外扩时阴影环最深处正好压在侧线所在的 border 列上，标签线芯比卡线
            深（卡阴影盒=边框盒不压线）——box-shadow 只画盒外，外扩后线列无环 -->
       <span
         v-if="tab.id === workspace.activeTabId"
-        class="pointer-events-none absolute top-0 bottom-[8px] rounded-t-[8px] -left-px -right-px"
+        class="pointer-events-none absolute top-0 bottom-0 rounded-t-[8px] -left-px -right-px"
         :style="{
           boxShadow: 'var(--card-shadow)',
           clipPath:
-            'polygon(-12px -12px, calc(100% + 12px) -12px, calc(100% + 12px) calc(100% + 8px), calc(100% - 12px) calc(100% + 8px), calc(100% - 12px) 100%, 12px 100%, 12px calc(100% + 8px), -12px calc(100% + 8px))',
+            i === 0
+              ? 'polygon(-12px -12px, calc(100% + 12px) -12px, calc(100% + 12px) 100%, calc(100% + 5px) 100%, calc(100% + 5px) calc(100% - 5px), 100% calc(100% - 5px), 100% 100%, 0px 100%, -12px 100%)'
+              : 'polygon(-12px -12px, calc(100% + 12px) -12px, calc(100% + 12px) 100%, calc(100% + 5px) 100%, calc(100% + 5px) calc(100% - 5px), 100% calc(100% - 5px), 100% 100%, 0px 100%, 0px calc(100% - 5px), -5px calc(100% - 5px), -5px 100%, -12px 100%)',
         }"
         aria-hidden="true"
       />

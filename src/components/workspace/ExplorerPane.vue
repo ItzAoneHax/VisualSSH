@@ -1070,11 +1070,17 @@ function onKeydown(e: KeyboardEvent) {
       class="pointer-events-none absolute inset-0 rounded-lg"
       :style="{
         boxShadow: 'var(--card-shadow)',
+        // 首标签直角熔接时阴影剪影同步转直角（与根卡同条件）：span 写死 rounded-lg
+        // 会让环影绕 8px 圆弧卷进直角区——卡顶左角内侧一弯影晕、左 border 线芯
+        // 随之起伏（亮色跨缝线色 Δ6 的根）
+        borderTopLeftRadius: !isDualPane && tabIsFirst ? '0px' : undefined,
         // 凹形裁剪：顶边中间段 6px 内豁免（非激活标签下的卡顶无影，ThemeShadow
-        // top-lit 语义），但左右各 12px 侧缘竖带自顶起保留阴影——侧缘线（半透明
-        // --line）底下的影须与激活标签侧影连续，否则熔接缝两侧线色一深一浅跳变
+        // top-lit 语义）；左右 12px 侧缘竖带自卡顶（=熔接缝）起保留到卡底——缝下
+        // 侧缘环与激活标签全高环影在缝两侧同强衔接，半透明线跨缝不跳色。
+        // 侧带不得上探过缝（旧版 -24px）：标签环影现全高覆盖缝上段，再叠卡影
+        // 会双重加深（缝上 Δ8 突变）；标签环影断柱年代的上探补位已无必要
         clipPath:
-          'polygon(-24px -24px, 12px -24px, 12px 6px, calc(100% - 12px) 6px, calc(100% - 12px) -24px, calc(100% + 24px) -24px, calc(100% + 24px) calc(100% + 24px), -24px calc(100% + 24px))',
+          'polygon(-24px 0px, 12px 0px, 12px 6px, calc(100% - 12px) 6px, calc(100% - 12px) 0px, calc(100% + 24px) 0px, calc(100% + 24px) calc(100% + 24px), -24px calc(100% + 24px))',
       }"
       aria-hidden="true"
     />
