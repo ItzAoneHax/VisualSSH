@@ -11,9 +11,8 @@ import {
   X,
   ArrowDownUp,
 } from "@lucide/vue";
-import { ChevronDown } from "@lucide/vue";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import { storeToRefs } from "pinia";
 
 import ColorPickerFlyout from "@/components/settings/ColorPickerFlyout.vue";
@@ -88,9 +87,7 @@ async function browseImage() {
   }
 }
 
-const removeMenuOpen = ref(false);
 function removeImage() {
-  removeMenuOpen.value = false;
   settings.update({ bgImage: "" });
 }
 
@@ -267,30 +264,14 @@ function stepFontSize(which: "editorFontSize" | "terminalFontSize", delta: numbe
           <div class="w-px" :style="{ background: 'var(--line-strong)' }" />
           <button
             type="button"
-            class="flex w-7 items-center justify-center text-dim transition-colors hover:bg-fill-subtle hover:text-ink"
-            aria-label="背景图片更多操作"
-            @click="removeMenuOpen = !removeMenuOpen"
+            class="flex w-7 items-center justify-center text-dim transition-colors hover:bg-fill-subtle hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            :disabled="!s.bgImage"
+            aria-label="移除背景图片"
+            title="移除背景图片"
+            @click="removeImage"
           >
-            <ChevronDown :size="13" :class="removeMenuOpen && 'rotate-180'" />
+            <X :size="14" />
           </button>
-          <div v-if="removeMenuOpen" class="absolute top-8 right-0 z-50">
-            <div class="fixed inset-0 -z-10" @click="removeMenuOpen = false" />
-            <div
-              class="mt-1 min-w-28 rounded-lg p-1 shadow-xl"
-              :style="{ background: 'var(--surface-solid)', border: '1px solid var(--stroke-flyout)' }"
-            >
-              <button
-                type="button"
-                class="flex h-8 w-full items-center gap-2.5 rounded-[2px] px-2.5 text-left text-sm transition-colors hover:bg-fill-subtle"
-                :disabled="!s.bgImage"
-                :class="!s.bgImage && 'cursor-not-allowed opacity-40'"
-                @click="removeImage"
-              >
-                <X :size="15" class="text-dim" />
-                移除
-              </button>
-            </div>
-          </div>
         </div>
       </template>
       <template #items>
@@ -302,6 +283,19 @@ function stepFontSize(which: "editorFontSize" | "terminalFontSize", delta: numbe
             :model-value="s.bgImageOpacity"
             label="背景图片不透明度"
             @update:model-value="(v) => settings.update({ bgImageOpacity: v })"
+          />
+        </div>
+        <div class="settings-expander-item">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium">模糊度</p>
+          </div>
+          <SettingsSlider
+            :model-value="s.bgImageBlur"
+            :min="0"
+            :max="40"
+            :step="1"
+            label="背景图片模糊度"
+            @update:model-value="(v) => settings.update({ bgImageBlur: v })"
           />
         </div>
         <div class="settings-expander-item">

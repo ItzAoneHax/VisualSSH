@@ -54,9 +54,24 @@ const bgImageStyle = computed(() => {
   const h = { start: "left", center: "center", end: "right" }[
     settings.settings.bgImageHAlign
   ];
+  const blur = settings.settings.bgImageBlur ?? 0;
+  // blur 采样越出盒沿会在四周露出半透明边（实测 Chromium blur(N) 高斯 σ≈0.875N，
+  // 衰减尾要离盒沿 ≈2.33×半径才淡到 Δ≤2）：四边对称外扩 2.33×半径把淡出沿推出窗外。
+  // 补边按像素而非 transform: scale——后者随模糊档放大整图（40px 时 +40%）。
+  // 同时必须显式给几何：fixed img 是替换元素，auto 宽高取固有尺寸不随窗口拉伸
+  // （object-fit/对齐随之失效），且要压过 preflight 的 img max-width:100% / height:auto
+  const bleed = Math.round(blur * 2.33);
   return {
     objectFit: OBJECT_FIT[settings.settings.bgImageFit],
     objectPosition: `${h} ${v}`,
+    opacity: settings.settings.bgImageOpacity,
+    filter: blur > 0 ? `blur(${blur}px)` : undefined,
+    left: `${-bleed}px`,
+    top: `${-bleed}px`,
+    width: `calc(100% + ${bleed * 2}px)`,
+    height: `calc(100% + ${bleed * 2}px)`,
+    maxWidth: "none",
+    maxHeight: "none",
   };
 });
 
@@ -137,7 +152,7 @@ onBeforeUnmount(() => {
     :src="bgImageSrc"
     alt=""
     aria-hidden="true"
-    class="pointer-events-none fixed inset-0 z-0"
+    class="pointer-events-none fixed z-0"
     :style="bgImageStyle"
     draggable="false"
   />

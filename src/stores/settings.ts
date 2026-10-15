@@ -51,6 +51,8 @@ export interface AppSettings {
   bgImage: string;
   /** 背景图不透明度 0.1–1 */
   bgImageOpacity: number;
+  /** 背景图模糊度 0–40（px） */
+  bgImageBlur: number;
   /** 背景图契合方式（Files 默认 UniformToFill） */
   bgImageFit: ImageFit;
   /** 背景图垂直对齐 */
@@ -101,6 +103,7 @@ const DEFAULTS: AppSettings = {
   bgColor: "#00000000",
   bgImage: "",
   bgImageOpacity: 1,
+  bgImageBlur: 0,
   bgImageFit: "uniformToFill",
   bgImageVAlign: "center",
   bgImageHAlign: "center",
@@ -143,6 +146,8 @@ function load(): AppSettings {
       parsed.detailsRowHeight = 36;
     }
     const merged = { ...DEFAULTS, ...parsed };
+    // 背景图模糊度 0–40
+    merged.bgImageBlur = Math.min(40, Math.max(0, Math.round(merged.bgImageBlur ?? 0)));
     // 信息窗格 tab 只接受两值；宽高下限 100（Files InfoPaneSettingsService Math.Max(100d, …)）
     if (merged.infoPaneTab !== "details" && merged.infoPaneTab !== "preview") {
       merged.infoPaneTab = "details";
