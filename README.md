@@ -59,6 +59,12 @@ Tauri 2 + Vue 3 + 纯 Rust SSH 协议栈打造的 Windows 桌面 SSH 文件管�
 - 密码 / 私钥口令存入 Windows 凭据管理器（DPAPI 加密），不落明文
 - 设置中心可查看与移除已知主机、已存凭据
 
+### MCP（Agent 接入）
+- 内置 MCP 服务器（[rmcp](https://github.com/modelcontextprotocol/rust-sdk) Tier 1 实现）：ZCode / DeepSeek Harness / OpenCode 等 Agent 可把 VisualSSH 当作远程服务器网关
+- 19 个工具：连接管理 / SFTP 全套读写 / `exec` 命令 / 递归搜索与目录树 / 上传下载（并入传输中心异步轮询）
+- 双传输：`VisualSSH.exe mcp` stdio 模式（harness 零配置接入，GUI 未运行时自动拉起）+ `http://127.0.0.1:27117/mcp` streamable HTTP 直连
+- 安全：仅本机监听 + 随机令牌 + 首次接入批准 + 危险操作可选拦截弹窗 + 全量调用审计；凭据永不出系统加密存储，Agent 不可见
+
 ### 设置中心
 - 外观：深色 / 浅色 / 跟随系统；应用背景色与背景图（不透明度、契合方式、对齐）
 - 偏好：默认排序列与方向、排序优先级、大小进制（1024 / 1000）、删除确认、状态栏显隐、终端字号
@@ -69,7 +75,7 @@ Tauri 2 + Vue 3 + 纯 Rust SSH 协议栈打造的 Windows 桌面 SSH 文件管�
 | --- | --- |
 | 操作系统 | Windows 10 / 11（需 WebView2 运行时） |
 | Node.js | ≥ 20.19 |
-| Rust | stable 工具链 ≥ 1.82 |
+| Rust | stable 工具链 ≥ 1.85 |
 
 ```bash
 git clone https://github.com/ItzAoneHax/VisualSSH.git

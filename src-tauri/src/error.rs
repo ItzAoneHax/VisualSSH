@@ -51,6 +51,9 @@ pub enum Error {
 
     #[error("操作超时，服务器未在限定时间内响应")]
     Timeout,
+
+    #[error("本地 IO — {0}")]
+    Io(String),
 }
 
 impl Serialize for Error {
@@ -65,5 +68,11 @@ impl Serialize for Error {
 impl From<russh_sftp::client::error::Error> for Error {
     fn from(e: russh_sftp::client::error::Error) -> Self {
         Error::Sftp(e.to_string())
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Error::Io(e.to_string())
     }
 }

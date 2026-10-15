@@ -1,11 +1,11 @@
 [package]
 name = "visualssh"
-version = "0.3.1"
+version = "0.4.0"
 description = "VisualSSH — 让远程文件操作，像本地一样优雅"
 authors = ["VisualSSH Contributors"]
 license = "MIT"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.85"
 
 [lib]
 # Tauri 2 约定：库 crate 供桌面与移动端入口共用
@@ -19,8 +19,16 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# fs/io-util：传输中心的本地文件流式读写
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util"] }
+# fs/io-util：传输中心的本地文件流式读写；net：MCP hub 的 TcpListener
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "time",
+    "sync",
+    "fs",
+    "io-util",
+    "net",
+] }
 # 剪贴板位图（CF_DIBV5/CF_DIB）→ PNG 编码（块 B；仅编码器，无全家桶解码器）
 png = "0.17"
 # 原生保存/打开对话框（M3 下载入口）
@@ -56,6 +64,27 @@ keyring = { version = "4", default-features = false, features = [
 ] }
 tauri-plugin-notification = "2.4.0"
 tauri-plugin-opener = "2.5.5"
+# MCP 服务器（Agent 接入）：官方 Rust SDK——streamable-http-server 挂 axum，
+# transport-io 供 `VisualSSH.exe mcp` stdio 模式复用同一 handler
+rmcp = { version = "3.5", features = [
+    "server",
+    "macros",
+    "transport-io",
+    "transport-streamable-http-server",
+] }
+axum = "0.8"
+# stdio shim 进程访问 hub 内部 /rpc 端点的 HTTP 客户端（仅 127.0.0.1，无 TLS）
+hyper-util = { version = "0.1", features = [
+    "client",
+    "client-legacy",
+    "http1",
+    "tokio",
+] }
+hyper = "1"
+http-body-util = "0.1"
+bytes = "1"
+# MCP 审计日志压缩（JSONL → zstd 块；bulk 整块压缩，每块独立可跳段）
+zstd = "0.13"
 
 [profile.release]
 # thin LTO + 16 codegen units：较 fat LTO/单 unit 的全量优化大幅缩短链接时间

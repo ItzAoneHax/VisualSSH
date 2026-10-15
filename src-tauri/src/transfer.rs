@@ -19,6 +19,7 @@ pub const EVENT_PROGRESS: &str = "transfer://progress";
 #[serde(rename_all = "camelCase")]
 pub struct TransferInfo {
     pub transfer_id: String,
+    pub connection_id: String,
     /// upload | download
     pub direction: &'static str,
     pub file_name: String,
@@ -69,6 +70,7 @@ impl TransferHandle {
     pub fn snapshot(&self) -> TransferInfo {
         TransferInfo {
             transfer_id: self.transfer_id.clone(),
+            connection_id: self.connection_id.clone(),
             direction: self.direction,
             file_name: self.file_name.clone(),
             bytes: self.bytes.load(Ordering::Relaxed),

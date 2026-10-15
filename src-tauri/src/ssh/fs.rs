@@ -85,7 +85,10 @@ pub(crate) fn mode_string(permissions: Option<u32>, kind: &str) -> String {
     let mode = permissions.unwrap_or(0);
     let mut out = String::with_capacity(10);
     out.push(type_char);
-    for shift in [6u32, 3, 0] {
+    // 三元组基址：owner=2（位 8-6）、group=1（位 5-3）、other=0（位 2-0）。
+    // 此前误用 [6,3,0]：测到的是 18-20/9-11 位（sticky/setgid/setuid 区），
+    // owner 恒空、group 错位——GUI 权限列与 MCP stat 同源同病。
+    for shift in [2u32, 1, 0] {
         for (i, c) in RWX.iter().enumerate() {
             let bit = shift * 3 + (2 - i as u32);
             out.push(if mode & (1 << bit) != 0 {
@@ -96,4 +99,22 @@ pub(crate) fn mode_string(permissions: Option<u32>, kind: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mode_string_rwx_triplets() {
+        assert_eq!(mode_string(Some(0o777), "dir"), "drwxrwxrwx");
+        assert_eq!(mode_string(Some(0o644), "file"), "-rw-r--r--");
+        assert_eq!(mode_string(Some(0o755), "file"), "-rwxr-xr-x");
+        assert_eq!(mode_string(Some(0o400), "file"), "-r--------");
+        assert_eq!(mode_string(Some(0o002), "file"), "--------w-");
+        // 含 sticky/setuid 的高位不串扰三元组（1777 → 777 部分）
+        assert_eq!(mode_string(Some(0o1777), "dir"), "drwxrwxrwx");
+        assert_eq!(mode_string(Some(0o4755), "file"), "-rwxr-xr-x");
+        assert_eq!(mode_string(None, "file"), "----------");
+    }
 }

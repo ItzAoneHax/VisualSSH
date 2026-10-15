@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { computed, onBeforeUnmount, onMounted, watch } from "vue";
 
+import McpConfirmDialog from "@/components/common/McpConfirmDialog.vue";
 import Modal from "@/components/common/Modal.vue";
 import TitleBar from "@/components/common/TitleBar.vue";
 import Toast from "@/components/common/Toast.vue";
 import { useConnectionsStore } from "@/stores/connections";
 import { useExitGuardStore } from "@/stores/exitGuard";
+import { useMcpGateStore } from "@/stores/mcpGate";
 import { useSettingsStore } from "@/stores/settings";
 import { useTransferStore } from "@/stores/transfer";
 import ConnectionManager from "@/views/ConnectionManager.vue";
@@ -17,6 +20,10 @@ const connections = useConnectionsStore();
 const settings = useSettingsStore();
 const transfers = useTransferStore();
 const exitGuard = useExitGuardStore();
+const mcpGate = useMcpGateStore();
+
+/** MCP 确认请求（危险操作拦截/首次接入批准）：Rust 事件 → 弹窗队列 */
+let unlistenMcpConfirm: UnlistenFn | null = null;
 
 async function handleDisconnect() {
   // C3：主页断开连接前，活动传输 > 0 时先确认
@@ -125,6 +132,16 @@ onMounted(() => {
   if (!("__TAURI_INTERNALS__" in window)) return;
   void (async () => {
     try {
+      unlistenMcpConfirm = await listen<{ id: number; summary: string }>(
+        "mcp://confirm",
+        (event) => mcpGate.push(event.payload),
+      );
+    } catch {
+      // MCP 事件不可用时无弹窗（拦截开关默认关闭）
+    }
+  })();
+  void (async () => {
+    try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       const win = getCurrentWindow();
       unlistenClose = await win.onCloseRequested(async (event) => {
@@ -142,6 +159,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   unlistenClose?.();
+  unlistenMcpConfirm?.();
 });
 </script>
 
@@ -186,4 +204,7 @@ onBeforeUnmount(() => {
       <button type="button" class="btn-danger" @click="exitGuard.settle(true)">确定离开</button>
     </div>
   </Modal>
+
+  <!-- MCP 危险操作拦截 / 首次接入批准 -->
+  <McpConfirmDialog />
 </template>

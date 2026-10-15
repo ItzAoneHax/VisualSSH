@@ -47,4 +47,14 @@ impl AppState {
     pub fn get(&self, connection_id: &str) -> Option<SessionHandle> {
         self.sessions.lock().unwrap().get(connection_id).cloned()
     }
+
+    /// 全部活跃连接快照（MCP list_connections / 连接解析用）。
+    pub fn list(&self) -> Vec<(String, SessionHandle)> {
+        self.sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(id, h)| (id.clone(), h.clone()))
+            .collect()
+    }
 }

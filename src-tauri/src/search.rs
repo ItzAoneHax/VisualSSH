@@ -230,7 +230,8 @@ impl SearchCtx {
 
 /// find 的 -iname 模式（FolderSearch.cs:64-67）：
 /// 含点按扩展名匹配（".docx" → "*.docx*"）；否则 *q*；find glob 元字符反斜杠转义。
-fn find_pattern(query: &str) -> String {
+/// MCP search_files 工具复用同一模式语义。
+pub(crate) fn find_pattern(query: &str) -> String {
     let escaped = query
         .replace('[', r"\[")
         .replace(']', r"\]")

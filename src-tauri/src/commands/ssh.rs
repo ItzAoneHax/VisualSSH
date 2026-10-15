@@ -14,7 +14,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// 单次文件系统操作的预算
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// 与前端 SshProfileInput 对应（camelCase 由 serde 转换）
+/// 与前端 SshProfileInput 对应（camelCase 由 serde 转换）；
+/// MCP connect 工具以 Rust 值构造（credentials → 此类型 → connect_with_timeout）。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshProfileInput {
@@ -68,7 +69,8 @@ fn non_empty(value: &Option<String>) -> Option<String> {
         .map(str::to_string)
 }
 
-async fn connect_with_timeout(
+/// MCP 连接工具复用（pub(crate)）：连接 + 首次 SFTP 握手的完整内核。
+pub(crate) async fn connect_with_timeout(
     profile: &SshProfileInput,
     known: KnownHosts,
 ) -> Result<(

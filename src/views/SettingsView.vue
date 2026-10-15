@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ArrowLeft, Info, Palette, ShieldCheck, SlidersHorizontal } from "@lucide/vue";
+import { ArrowLeft, Bot, Info, Palette, ShieldCheck, SlidersHorizontal } from "@lucide/vue";
 import { ref, type Component } from "vue";
 
 import AboutSection from "@/components/settings/AboutSection.vue";
 import AppearanceSection from "@/components/settings/AppearanceSection.vue";
+import McpSection from "@/components/settings/McpSection.vue";
 import PreferencesSection from "@/components/settings/PreferencesSection.vue";
 import SecuritySection from "@/components/settings/SecuritySection.vue";
 import { useSettingsStore } from "@/stores/settings";
@@ -14,12 +15,13 @@ import { useSettingsStore } from "@/stores/settings";
  */
 const settings = useSettingsStore();
 
-type Section = "appearance" | "preferences" | "security" | "about";
+type Section = "appearance" | "preferences" | "security" | "mcp" | "about";
 
 const sections: { key: Section; label: string; icon: Component }[] = [
   { key: "appearance", label: "外观", icon: Palette },
   { key: "preferences", label: "首选项", icon: SlidersHorizontal },
   { key: "security", label: "SSH 安全", icon: ShieldCheck },
+  { key: "mcp", label: "MCP（Agent）", icon: Bot },
   { key: "about", label: "关于", icon: Info },
 ];
 
@@ -27,6 +29,7 @@ const sectionViews: Record<Section, Component> = {
   appearance: AppearanceSection,
   preferences: PreferencesSection,
   security: SecuritySection,
+  mcp: McpSection,
   about: AboutSection,
 };
 
@@ -36,6 +39,7 @@ const sectionTitles: Record<Section, string> = {
   appearance: "外观",
   preferences: "首选项",
   security: "SSH 安全",
+  mcp: "MCP（Agent 接入）",
   about: "关于",
 };
 </script>

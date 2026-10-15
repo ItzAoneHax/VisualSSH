@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { credentialDelete, credentialGet, credentialKey, credentialPut } from "@/api/credentials";
+import { mcpSyncProfiles } from "@/api/mcp";
 import { connectSsh, disconnectSsh, testSsh, trustHost } from "@/api/ssh";
 import { useTerminalStore } from "@/stores/terminal";
 import { useTransferStore } from "@/stores/transfer";
@@ -98,6 +99,19 @@ function parseHostKeyError(
 export const useConnectionsStore = defineStore("connections", () => {
   /** 所有已保存的连接配置 */
   const profiles = ref<SshProfile[]>(loadProfiles());
+  // MCP 启动同步：persist() 只在变更时触发，这里补首推
+  if ("__TAURI_INTERNALS__" in window) {
+    void mcpSyncProfiles(
+      profiles.value.map((p) => ({
+        id: p.id,
+        name: p.alias,
+        host: p.host,
+        port: p.port,
+        username: p.username,
+        privateKeyPath: p.privateKeyPath ?? null,
+      })),
+    ).catch(() => {});
+  }
   /** 每个配置最近一次「测试连接」的结果，key 为 profile.id */
   const testStates = ref<Record<string, TestState>>({});
   /** 正在发起正式连接的 profile.id */
@@ -116,6 +130,21 @@ export const useConnectionsStore = defineStore("connections", () => {
 
   function persist() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles.value));
+    // MCP：连接元数据快照推给后端（connect 工具的 profile 名解析源；绝不含凭据）
+    if ("__TAURI_INTERNALS__" in window) {
+      void mcpSyncProfiles(
+        profiles.value.map((p) => ({
+          id: p.id,
+          name: p.alias,
+          host: p.host,
+          port: p.port,
+          username: p.username,
+          privateKeyPath: p.privateKeyPath ?? null,
+        })),
+      ).catch(() => {
+        // 后端未就绪（极早期）时静默，下次变更重推
+      });
+    }
   }
 
   /** 启动时执行一次：迁移旧明文凭据；失败静默保留，下次启动重试 */

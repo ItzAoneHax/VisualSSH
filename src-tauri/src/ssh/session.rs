@@ -288,7 +288,11 @@ impl SshSession {
                     ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
                     ChannelMsg::ExtendedData { data, .. } => stderr.extend_from_slice(&data),
                     ChannelMsg::ExitStatus { exit_status } => exit_code = Some(exit_status),
-                    ChannelMsg::Eof | ChannelMsg::Close => break,
+                    // OpenSSH 的消息序是 Data → Eof → ExitStatus → Close：
+                    // 在 Eof 就退出会永远读不到 ExitStatus（退出码恒 null），
+                    // 只有 Close 才代表通道真正结束。
+                    ChannelMsg::Eof => {}
+                    ChannelMsg::Close => break,
                     _ => {}
                 }
             }
@@ -520,6 +524,37 @@ impl SshSession {
             if let Err(e) = self.sftp.rename(&tmp_path, path).await {
                 return Err(Error::Sftp(format!(
                     "替换 {path} 失败: {e}。你的新内容完整保留在 {tmp_path}，可在文件列表中手动重命名恢复"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// 字节版原子写（MCP write_file 的 base64 模式）：临时文件 + rename 替换，
+    /// 回退策略与 write_file 一致。空内容走 write_file 的零字节路径。
+    pub async fn write_file_bytes(&self, path: &str, bytes: &[u8]) -> Result<()> {
+        if let Ok(text) = std::str::from_utf8(bytes) {
+            return self.write_file(path, text).await;
+        }
+        let tmp_path = format!("{path}.vsshtmp");
+        let mut tmp = self.open_write(&tmp_path).await?;
+        if let Err(e) = tmp.write_all(bytes).await {
+            let _ = self.sftp.remove_file(&tmp_path).await;
+            return Err(Error::Sftp(format!("写入 {path} 失败: {e}")));
+        }
+        if let Err(e) = tmp.close().await {
+            let _ = self.sftp.remove_file(&tmp_path).await;
+            return Err(Error::Sftp(format!("写入 {path} 失败: {e}")));
+        }
+        if let Err(first) = self.sftp.rename(&tmp_path, path).await {
+            self.sftp.remove_file(path).await.map_err(|e| {
+                Error::Sftp(format!(
+                    "替换 {path} 失败: {first}（清理旧文件也失败: {e}）。新内容完整保留在 {tmp_path}，可手动恢复"
+                ))
+            })?;
+            if let Err(e) = self.sftp.rename(&tmp_path, path).await {
+                return Err(Error::Sftp(format!(
+                    "替换 {path} 失败: {e}。新内容完整保留在 {tmp_path}，可手动恢复"
                 )));
             }
         }
