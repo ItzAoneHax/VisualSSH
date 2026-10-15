@@ -61,7 +61,8 @@ try {
     renameSync(target, stale);
     copyFileSync(source, target);
     console.log(
-      `⚠ VisualSSH.exe 正在运行 — 旧版已改名 ${basename(stale)}（运行中的进程与 MCP 会话不受影响），新版已就位，重启应用后生效`,
+      `⚠ VisualSSH.exe 正在运行 — 旧版已改名 ${basename(stale)} 腾位，新版已就位；` +
+        "运行中的 GUI 将在任务清空且用户闲置 5 分钟后自动升级并恢复原页面（MCP 会话不受影响），也可手动重启立即生效",
     );
   } catch {
     console.error(

@@ -53,6 +53,8 @@ export const useWorkspaceStore = defineStore("workspace", () => {
   /** 拖拽重排中的标签 id（null=无）：拖拽中的标签不算完整标签，
       首标签熔接特判（直角/左段无线）随之失效（TabBar/Workspace/ExplorerPane 共享） */
   const tabDragId = ref<string | null>(null);
+  /** 换版会话恢复进行中（Workspace 挂载的默认建标签让位，由恢复流程显式重建） */
+  const restoringSession = ref(false);
 
   const activeTab = computed(
     () => tabs.value.find((t) => t.id === activeTabId.value) ?? null,
@@ -290,6 +292,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     activeConnectionId,
     closedTabs,
     tabDragId,
+    restoringSession,
     init,
     openTab,
     activateTab,

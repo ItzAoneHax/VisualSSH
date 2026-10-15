@@ -12,6 +12,11 @@ import { useExitGuardStore } from "@/stores/exitGuard";
 import { useMcpGateStore } from "@/stores/mcpGate";
 import { useSettingsStore } from "@/stores/settings";
 import { useTransferStore } from "@/stores/transfer";
+import {
+  consumeUpgradeSnapshot,
+  initAutoUpgrade,
+  restoreUpgradeSession,
+} from "@/utils/autoUpgrade";
 import ConnectionManager from "@/views/ConnectionManager.vue";
 import SettingsView from "@/views/SettingsView.vue";
 import Workspace from "@/views/Workspace.vue";
@@ -140,6 +145,13 @@ onMounted(() => {
       // MCP 事件不可用时无弹窗（拦截开关默认关闭）
     }
   })();
+  // 自动换版：上次换版留下的会话快照先恢复（重连+重建标签），完成后启动换版监视
+  const upgradeSnap = consumeUpgradeSnapshot();
+  if (upgradeSnap) {
+    void restoreUpgradeSession(upgradeSnap).finally(() => initAutoUpgrade());
+  } else {
+    initAutoUpgrade();
+  }
   void (async () => {
     try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");

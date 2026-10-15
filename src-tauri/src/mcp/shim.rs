@@ -97,6 +97,8 @@ impl HttpRpc {
                 }
                 eprintln!("[visualssh-mcp] GUI 未运行，自动拉起主程序");
                 if let Ok(exe) = std::env::current_exe() {
+                    // current_exe 是启动时记录的路径：pack-exe 换版腾位后该路径上
+                    // 已是新版——拉起自然落在最新版本，无需另找 canonical
                     let _ = std::process::Command::new(exe).spawn();
                 }
                 if wait_hub(port, WAIT_HUB_TIMEOUT).await {

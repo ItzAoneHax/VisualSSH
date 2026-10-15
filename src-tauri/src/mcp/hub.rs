@@ -77,12 +77,36 @@ impl McpHub {
             .layer(middleware::from_fn_with_state(self.clone(), auth_gate))
             .with_state(self.clone());
 
-        let listener = match tokio::net::TcpListener::bind(addr).await {
-            Ok(l) => l,
-            Err(e) => {
-                let msg = format!("MCP 端口 {} 绑定失败: {e}", cfg.port);
-                *self.last_error.lock().unwrap() = Some(msg.clone());
-                return Err(msg);
+        let listener = {
+            let mut last_err = None;
+            let mut bound = None;
+            // 自动换版交接：旧进程退出才释放端口——AddrInUse 时重试等它让位
+            //（平时端口被占 = 另一实例在跑，重试耗尽后照旧报错，去重语义不变）
+            for _ in 0..20 {
+                match tokio::net::TcpListener::bind(addr).await {
+                    Ok(l) => {
+                        bound = Some(l);
+                        break;
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                        last_err = Some(e);
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
+                    Err(e) => {
+                        let msg = format!("MCP 端口 {} 绑定失败: {e}", cfg.port);
+                        *self.last_error.lock().unwrap() = Some(msg.clone());
+                        return Err(msg);
+                    }
+                }
+            }
+            match bound {
+                Some(l) => l,
+                None => {
+                    let e = last_err.unwrap();
+                    let msg = format!("MCP 端口 {} 绑定失败（重试 10s 后放弃）: {e}", cfg.port);
+                    *self.last_error.lock().unwrap() = Some(msg.clone());
+                    return Err(msg);
+                }
             }
         };
         let task = tokio::spawn(async move {

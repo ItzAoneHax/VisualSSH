@@ -1,7 +1,7 @@
 mod archive;
 mod clipboard_image;
 mod clipboard_vfile;
-mod commands;
+pub(crate) mod commands;
 mod error;
 pub mod mcp;
 mod search;
@@ -15,6 +15,9 @@ mod walk;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     use tauri::Manager;
+
+    // 自动换版判定基准：进程启动时刻（须在一切可能替换 exe 的操作之前取）
+    commands::upgrade::mark_started();
 
     tauri::Builder::default()
         .manage(state::AppState::default())
@@ -121,6 +124,8 @@ pub fn run() {
             commands::mcp::mcp_pending_confirms,
             commands::mcp::mcp_sync_profiles,
             commands::mcp::mcp_snippets,
+            commands::upgrade::upgrade_state,
+            commands::upgrade::upgrade_apply,
         ])
         .build(tauri::generate_context!())
         .expect("VisualSSH 初始化失败")

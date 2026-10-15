@@ -54,6 +54,57 @@ pub struct McpCtx {
     pub audit: Arc<AuditLog>,
     pub confirms: Arc<crate::mcp::audit::ConfirmQueue>,
     pub config: Arc<RwLock<McpConfig>>,
+    /// 自动换版的等待条件（Arc：McpCtx 派生 Clone，原子/锁不可 Clone）
+    pub busy: Arc<McpBusy>,
+}
+
+/// MCP 活动度量：在途工具调用数 + 最近一次调用时刻。
+pub struct McpBusy {
+    in_flight: std::sync::atomic::AtomicI64,
+    last_activity: std::sync::Mutex<Option<std::time::Instant>>,
+}
+
+impl Default for McpBusy {
+    fn default() -> Self {
+        Self {
+            in_flight: std::sync::atomic::AtomicI64::new(0),
+            last_activity: std::sync::Mutex::new(None),
+        }
+    }
+}
+
+impl McpBusy {
+    /// MCP 是否忙碌（自动换版据此推迟重启）：在途调用 > 0，
+    /// 或最近 30s 内有过调用（Agent 的会话还热着，别杀）
+    pub fn is_busy(&self) -> bool {
+        if self.in_flight.load(std::sync::atomic::Ordering::Relaxed) > 0 {
+            return true;
+        }
+        self.last_activity
+            .lock()
+            .unwrap()
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(30))
+    }
+}
+
+/// dispatch 的忙碌计数 RAII：入口 +1 / 出口 -1，两端都刷新活动时刻。
+struct BusyGuard<'a>(&'a McpBusy);
+
+impl<'a> BusyGuard<'a> {
+    fn enter(busy: &'a McpBusy) -> Self {
+        busy.in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        *busy.last_activity.lock().unwrap() = Some(std::time::Instant::now());
+        Self(busy)
+    }
+}
+
+impl Drop for BusyGuard<'_> {
+    fn drop(&mut self) {
+        self.0
+            .in_flight
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        *self.0.last_activity.lock().unwrap() = Some(std::time::Instant::now());
+    }
 }
 
 pub struct ToolSpec {
@@ -491,6 +542,7 @@ fn confirm_request_for(ctx: &McpCtx, name: &str, args: &Value) -> Option<Confirm
 
 /// 统一入口：审计 + 危险操作拦截 + 分发。
 pub async fn dispatch(ctx: &McpCtx, via: Via, name: &str, args: Value) -> Result<Value, String> {
+    let _busy = BusyGuard::enter(&ctx.busy);
     let args = if args.is_null() { json!({}) } else { args };
 
     if !tool_specs().iter().any(|t| t.name == name) {

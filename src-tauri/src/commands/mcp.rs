@@ -10,7 +10,7 @@ use crate::mcp::audit::{AuditEntry, ConfirmQueue};
 use crate::mcp::config::{self, McpConfig};
 use crate::mcp::hub::McpHub;
 use crate::mcp::profiles::{ProfileCache, ProfileMeta};
-use crate::mcp::tools::McpCtx;
+use crate::mcp::tools::{McpBusy, McpCtx};
 
 /// hub 运行状态（设置页显示）。
 #[derive(Serialize)]
@@ -329,6 +329,7 @@ pub fn build_ctx(app: tauri::AppHandle) -> (McpCtx, Arc<McpHub>) {
         audit: Arc::new(audit),
         confirms: Arc::new(ConfirmQueue::default()),
         config: Arc::new(std::sync::RwLock::new(cfg)),
+        busy: Arc::new(McpBusy::default()),
     };
     let hub = Arc::new(McpHub::new(ctx.clone()));
     (ctx, hub)

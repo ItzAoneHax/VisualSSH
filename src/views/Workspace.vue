@@ -295,9 +295,10 @@ onBeforeUnmount(() => {
 });
 
 /** 挂载：建立工作区会话（单标签单窗格）并加载初始目录。
- *  App 以「是否在主页」控制本组件挂载，连接数变化不重建（多标签共存） */
+ *  App 以「是否在主页」控制本组件挂载，连接数变化不重建（多标签共存）；
+ *  换版会话恢复期间让位（restoringSession），由恢复流程重连后显式重建 */
 onMounted(() => {
-  if (connections.active && !workspace.tabs.length) {
+  if (connections.active && !workspace.tabs.length && !workspace.restoringSession) {
     const conn = connections.active;
     const tab = workspace.init(conn.connectionId, conn.profile.id, conn.alias);
     workspace.initPane(tab.activePaneId, conn.connectionId, conn.rootPath, conn.profile.id);
