@@ -29,6 +29,8 @@ const mcpGate = useMcpGateStore();
 
 /** MCP 确认请求（危险操作拦截/首次接入批准）：Rust 事件 → 弹窗队列 */
 let unlistenMcpConfirm: UnlistenFn | null = null;
+/** 托盘「退出」：走退出保护后真正退出 */
+let unlistenTrayExit: UnlistenFn | null = null;
 
 async function handleDisconnect() {
   // C3：主页断开连接前，活动传输 > 0 时先确认
@@ -157,8 +159,15 @@ onMounted(() => {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       const win = getCurrentWindow();
       unlistenClose = await win.onCloseRequested(async (event) => {
-        if (transfers.activeCount === 0) return;
+        // 关闭 = 隐藏到后台静默运行：MCP hub / 进行中传输 / SSH 会话全部继续，
+        // 托盘图标可唤起或退出（真退出走 tray://exit 的保护流程）
         event.preventDefault();
+        await win.hide();
+      });
+      unlistenTrayExit = await listen("tray://exit", async () => {
+        // 先唤起窗口（退出确认弹窗在窗口里渲染），有活动传输时挂起确认
+        await win.show();
+        await win.setFocus();
         if (await exitGuard.request()) {
           await win.destroy();
         }
@@ -172,6 +181,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   unlistenClose?.();
   unlistenMcpConfirm?.();
+  unlistenTrayExit?.();
 });
 </script>
 

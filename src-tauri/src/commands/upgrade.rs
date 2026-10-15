@@ -11,6 +11,8 @@
 use std::sync::OnceLock;
 use std::time::SystemTime;
 
+use tauri::Manager;
+
 static STARTED_AT: OnceLock<SystemTime> = OnceLock::new();
 
 /// 记录进程启动时刻（lib.rs run() 入口调用——换版判定的基准）。
@@ -51,11 +53,19 @@ pub async fn upgrade_apply(app: tauri::AppHandle) -> Result<(), crate::error::Er
     let exe = pending_upgrade().ok_or_else(|| {
         crate::error::Error::Io("没有待启用的更新（exe 路径上的文件未在启动后替换）".into())
     })?;
+    // 后台（隐藏）状态换版则新版也静默启动，可见状态换版则正常带窗启动
+    let visible = app
+        .get_webview_window("main")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(true);
+    let mut cmd = std::process::Command::new(&exe);
+    if !visible {
+        cmd.arg("--background");
+    }
     // 顺序：先拉起新版再退出——本进程的 hub listener 在线到最后，新版本的
     // 绑定重试（hub::start）等端口释放；交接窗口内的 MCP 请求失败由 shim
     // 自愈（连接失败 → 重置就绪缓存 → 重新探测 → 重放）
-    std::process::Command::new(&exe)
-        .spawn()
+    cmd.spawn()
         .map_err(|e| crate::error::Error::Io(format!("拉起新版失败: {e}")))?;
     // 小缓冲：让新版先到达绑定重试阶段再放手，缩短 shim 自愈窗口
     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;

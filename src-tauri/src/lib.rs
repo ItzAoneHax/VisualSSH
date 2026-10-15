@@ -13,13 +13,23 @@ mod transfer;
 mod walk;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    use tauri::Manager;
+pub fn run(background: bool) {
+    use tauri::{Emitter, Manager};
 
     // 自动换版判定基准：进程启动时刻（须在一切可能替换 exe 的操作之前取）
     commands::upgrade::mark_started();
 
     tauri::Builder::default()
+        // 单实例：二次启动唤起已有实例的窗口后自行退出（shim/自动换版的
+        // --background 辅助拉起不唤起——本就该静默）
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if !argv.iter().any(|a| a == "--background") {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.show();
+                    let _ = win.set_focus();
+                }
+            }
+        }))
         .manage(state::AppState::default())
         .manage(transfer::TransferManager::default())
         .manage(std::sync::Arc::new(terminal::TerminalManager::default()))
@@ -29,7 +39,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        .setup(move |app| {
             // 换版残留清理：npm run exe 在应用运行中交付时把旧 exe 改名为
             // <exe>.old[N] 腾位（Windows 运行中的 exe 不能覆盖但可改名）。
             // 启动时尽力删除同目录残留——仍被旧进程占用的会失败，静默留给下次。
@@ -47,9 +57,79 @@ pub fn run() {
                     }
                 }
             }
+
+            // 托盘：后台常驻入口——关窗=隐藏（MCP hub/传输/会话继续），
+            // 托盘左键/「显示主窗口」唤起，「退出」经 tray://exit 走前端退出保护
+            {
+                use tauri::menu::{Menu, MenuItem};
+                use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+                let show_item = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
+                let quit_item = MenuItem::with_id(app, "quit", "退出 VisualSSH", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+                let mut tray = TrayIconBuilder::with_id("visualssh-tray")
+                    .tooltip("VisualSSH")
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| {
+                        let show = || {
+                            if let Some(win) = app.get_webview_window("main") {
+                                let _ = win.show();
+                                let _ = win.set_focus();
+                            }
+                        };
+                        match event.id.as_ref() {
+                            "show" => show(),
+                            // 真退出先唤起窗口（退出确认弹窗在窗口里渲染），放行与否由前端决定
+                            "quit" => {
+                                show();
+                                let _ = app.emit("tray://exit", ());
+                            }
+                            _ => {}
+                        }
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle().clone();
+                            if let Some(win) = app.get_webview_window("main") {
+                                let _ = win.show();
+                                let _ = win.set_focus();
+                            }
+                        }
+                    });
+                if let Some(icon) = app.default_window_icon() {
+                    tray = tray.icon(icon.clone());
+                }
+                // TrayIcon 被 drop 即移除——托管进 state 保命
+                app.manage(tray.build(app)?);
+            }
+
+            // 主窗口可见性：配置默认隐藏（visible:false），常规启动在此显示；
+            // --background（shim 自动拉起/后台自动换版）保持隐藏、仅托盘常驻
+            if !background {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.show();
+                    let _ = win.set_focus();
+                }
+            }
+
             // MCP hub：与前端启动解耦（stdio shim 可能只等这个端口）
             let (_ctx, hub) = commands::mcp::build_ctx(app.handle().clone());
             let hub_enabled = hub.ctx.config.read().unwrap().enabled;
+            // 后台辅助实例去重：hub 端口已有实例在听说明只是重复拉起，直接退
+            //（单实例插件已挡掉绝大多数，这里兜底竞态）
+            if background && hub_enabled {
+                let port = hub.ctx.config.read().unwrap().port;
+                if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                    eprintln!("[visualssh] hub 已在运行，后台辅助实例退出");
+                    app.handle().exit(0);
+                    return Ok(());
+                }
+            }
             app.manage(hub.clone());
             app.manage(hub.ctx.profiles.clone());
             app.manage(hub.ctx.confirms.clone());
